@@ -441,32 +441,72 @@ function frameProviders(lab: Lab, mapped: Host[]) {
   globe.frame(spots);
 }
 
-async function load() {
-  statusEl.textContent = "Loading catalog…";
-  refreshEl.classList.add("spin");
-  refreshEl.disabled = true;
-  notice = "";
+/** The last good catalog, kept in this browser so a return visit paints at once and works offline. */
+const SAVED_KEY = "modex:catalog";
+/** The catalog changes a few times a day; an open tab checks twice an hour. */
+const REFRESH_MS = 30 * 60 * 1000;
+
+function useCatalog(body: CatalogBody) {
+  labs = body.labs ?? [];
+  models = body.models ?? [];
+  hosts = body.hosts ?? [];
+  serves = body.serves ?? [];
+  fetchedAt = body.fetchedAt ?? "";
+}
+
+function readSaved(): CatalogBody | null {
   try {
-    const res = await fetch("/api/catalog");
+    const raw = localStorage.getItem(SAVED_KEY);
+    const body = raw ? (JSON.parse(raw) as CatalogBody) : null;
+    return body && Array.isArray(body.labs) && body.labs.length ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+function save(body: CatalogBody) {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(body));
+  } catch {
+    // Storage full or blocked: the app still works, it just won't paint instantly next time.
+  }
+}
+
+/**
+ * Fetch the catalog. Quiet loads (the background refresh) leave the UI alone unless the data changed;
+ * a failed fetch keeps whatever is on screen and says it is the saved copy.
+ * An explicit refresh asks the browser to revalidate instead of reusing its 15-minute HTTP cache.
+ */
+async function load(options: { quiet?: boolean; force?: boolean } = {}) {
+  if (!options.quiet) {
+    statusEl.textContent = "Loading catalog…";
+    refreshEl.classList.add("spin");
+    refreshEl.disabled = true;
+  }
+  try {
+    const res = await fetch("/api/catalog", options.force ? { cache: "no-cache" } : undefined);
     if (!res.ok) throw new Error(String(res.status));
     const body = (await res.json()) as CatalogBody;
-    labs = body.labs ?? [];
-    models = body.models ?? [];
-    hosts = body.hosts ?? [];
-    serves = body.serves ?? [];
-    fetchedAt = body.fetchedAt ?? "";
+    const changed = body.fetchedAt !== fetchedAt;
+    const before = notice;
+    if (body.labs?.length) {
+      useCatalog(body);
+      save(body);
+    }
     notice = body.error ?? "";
+    if (!options.quiet || changed || notice !== before) render();
   } catch {
-    labs = [];
-    models = [];
-    hosts = [];
-    serves = [];
-    notice = "Catalog request failed.";
+    if (labs.length) {
+      const time = fetchedAt ? new Date(fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+      notice = `Offline · showing the saved catalog${time ? ` from ${time}` : ""}.`;
+    } else {
+      notice = "Catalog request failed.";
+    }
+    render();
   }
   refreshEl.classList.remove("spin");
   refreshEl.disabled = false;
   appEl.dataset.state = "ready";
-  render();
 }
 
 function setWindow(onlyRecent: boolean) {
@@ -512,7 +552,7 @@ allEl.addEventListener("click", () => {
 });
 refreshEl.addEventListener("click", () => {
   cueTick();
-  void load();
+  void load({ force: true });
 });
 document.querySelectorAll(".panel summary").forEach((summary) => summary.addEventListener("click", cueTick));
 globe.onArcLand = cueLand;
@@ -544,4 +584,15 @@ window.addEventListener("resize", () => {
   render();
 });
 
-void load();
+// A saved catalog paints straight away; the network copy replaces it when it arrives.
+const saved = readSaved();
+if (saved) {
+  useCatalog(saved);
+  appEl.dataset.state = "ready";
+  render();
+}
+void load({ quiet: !!saved });
+// Keep an open tab current without polling for data that rarely changes.
+setInterval(() => {
+  if (!document.hidden) void load({ quiet: true });
+}, REFRESH_MS);

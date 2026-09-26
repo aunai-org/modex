@@ -19,7 +19,7 @@ Cloudflare Pages:
 - Output directory: `dist`
 - The `functions/` directory is the Pages Function for `/api/catalog`
 
-The browser only talks to this origin. The function fetches `https://models.dev/api.json`, keeps a short summary, and caches it in the isolate for about ten minutes.
+The browser only talks to this origin. The function fetches `https://models.dev/api.json`, keeps a short summary, and caches it for an hour, in the isolate and in Cloudflare's edge cache. The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and refreshes it in the background every 30 minutes.
 
 ## Data
 

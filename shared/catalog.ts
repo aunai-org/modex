@@ -1,6 +1,7 @@
 const MODELS_URL = "https://models.dev/models.json";
 const PROVIDERS_URL = "https://models.dev/api.json";
-const TTL_MS = 10 * 60 * 1000;
+/** models.dev changes a few times a day; an hour per isolate matches the edge cache in functions/api/catalog.ts. */
+const TTL_MS = 60 * 60 * 1000;
 const MAX_MODELS = 500;
 const MAX_SERVES = 4000;
 
