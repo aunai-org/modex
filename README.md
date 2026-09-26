@@ -1,59 +1,66 @@
 # Modex
 
-A globe for the [models.dev](https://models.dev) catalog. The picture is Lab → Model → Provider: a lab has a place, its models fan out around that marker, and the providers that serve a model can sit somewhere else. Pins are approximate headquarters kept in this repo. The catalog itself has no coordinates.
+**The [models.dev](https://models.dev) index, on a map.**
 
-## Run
+Modex puts the AI model world on a globe. Every AI lab sits where it's based. Click one and its models fan out around it. Pick a model and you'll see arcs reaching out to every provider that serves it, from the lab's own API to cloud platforms and gateways around the world.
+
+It's a small, fast way to answer questions like *"who actually serves this model?"* or *"what did this lab release lately?"*, without reading through a catalog.
+
+## What you can do
+
+- **Explore labs.** Dozens of labs, most pinned at their approximate headquarters. Nearby ones group into a numbered badge; click it to fan them out.
+- **See the models.** Select a lab to see its newest models ring around it. The card shows context size, input types, reasoning and tool support, and whether the weights are open.
+- **Follow the providers.** Select a model and arcs draw out to the providers that serve it: Amazon Bedrock, Azure, Vertex, OpenRouter, and many more.
+- **Catch what's new.** Labs that shipped something in the last 15 days pulse. The Latest panel lists the past week's releases.
+- **Make it yours.** Filter by category, search for a lab, and turn on the optional sound effects.
+
+It works on phones too, and it remembers the last catalog it loaded, so return visits open instantly (even offline).
+
+## Run it locally
+
+You'll need Node.js 22 (20.19 or newer also works).
 
 ```bash
 npm install
+```
+```bash
 npm run dev
 ```
 
-Open the local URL Vite prints. The dev server serves `/catalog.json` live from models.dev.
+Then open the address Vite prints, usually <http://localhost:5173>. The dev server pulls the catalog live from models.dev.
 
-## Deploy
+## Deploy it
 
-Cloudflare Pages, connected to this repository:
+Modex builds to a plain folder of static files, so you can host it almost anywhere:
 
-| Setting | Value |
-| --- | --- |
-| Framework preset | None |
-| Build command | `npm run build` |
-| Build output directory | `dist` |
-| Environment variable | `NODE_VERSION` = `22` |
+```bash
+npm run build
+```
 
-### Catalog mode
+Publish the `dist/` folder, and that's it. The build fetches models.dev once and bakes the catalog into `dist/catalog.json`, so there's no server to run and nothing to pay per visit. Rebuild now and then (a scheduled rebuild every 12 hours is included) to pick up new models.
 
-The catalog can be served two ways. Pick one with the `CATALOG_MODE` environment variable; no code change is needed.
+Modex runs on **Cloudflare Pages**. [docs/DEPLOY.md](docs/DEPLOY.md) walks through that setup step by step, plus what to carry over to other hosts.
 
-| `CATALOG_MODE` | How it works | Cost |
-| --- | --- | --- |
-| `static` (default, or unset) | `npm run build` fetches models.dev once and writes `dist/catalog.json`. A rebuild every 12 hours keeps it current. | Static files only: free and unlimited, no CPU limit. |
-| `function` | The page calls `/api/catalog`, a Pages Function in `functions/` that caches the catalog for an hour with the Cache API. | Each request is a Function call (100,000 a day on the free plan), and a cache miss needs about 60 ms of CPU, more than the free plan's 10 ms. Use it on Workers Paid. |
+## Where the data comes from
 
-To change it: Cloudflare → Workers & Pages → modex → **Settings → Variables and Secrets** → add `CATALOG_MODE` (Text) for Production (and Preview if you like) → save → **Deployments → Retry deployment** on the latest build. Remove the variable, or set it to `static`, to switch back.
+- **Labs, models, and providers** come from [models.dev](https://models.dev), an open, community-maintained catalog (© 2025 models.dev, MIT License). Modex just reads it and draws it.
+- **Locations** aren't part of models.dev. They're approximate headquarters, or a registered business address when no HQ is published, gathered by hand in [`src/places.ts`](src/places.ts).
+- **Map outlines** come from Natural Earth, via world-atlas.
 
-In static mode a failed fetch fails the build on purpose, so Cloudflare keeps serving the last good deploy. The Function in `functions/` is still deployed but nothing calls it.
+Some labs and providers don't have a location yet, so they aren't pinned on the globe (their models still show up everywhere else). If you know where one is based, a pull request adding it to `src/places.ts` with a source link is very welcome. The same goes for fixes.
 
-Locally: `npm run build` for static, `CATALOG_MODE=function npm run build` for function mode. `npm run dev` serves both URLs.
+## How it's built
 
-The UI follows the mode: the About panel says how often data changes, the time beside the buttons reads "Data from" (build time) or "Updated", and the refresh button either checks for a newer build or refetches. All of that wording lives in `src/mode.ts`; the rebuild hours there must match the cron in `.github/workflows/rebuild.yml`.
+A small Vite + TypeScript app with three.js for the globe. No framework, no accounts, no tracking, no third-party scripts. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the details.
 
-### Rebuild every 12 hours (static mode)
+## A note on accuracy
 
-`.github/workflows/rebuild.yml` calls a Cloudflare deploy hook at 00:00 and 12:00 UTC:
+Modex is an independent project. It isn't affiliated with models.dev or with any lab or provider on the map. Locations are approximate, and model details can be incomplete or out of date, so check with the provider before relying on them.
 
-1. Cloudflare → Workers & Pages → modex → Settings → Builds → **Deploy hooks** → add one for the production branch.
-2. GitHub → Settings → Secrets and variables → Actions → add `CLOUDFLARE_DEPLOY_HOOK` with the hook URL.
+## License
 
-GitHub runs scheduled workflows only from the default branch (`main`). The workflow can also be run by hand from the Actions tab.
+Copyright (C) 2026 Modex.
 
-The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and checks for a newer one every 30 minutes.
+Modex is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You can use, study, change, and share it. If you run a modified version for others, including as a website, you need to share your changes under the same license. It comes with no warranty: the authors aren't liable for how it's used.
 
-## Data
-
-- Provider name, id, model count, npm package, and docs URL come from models.dev.
-- A pin appears only when `src/places.ts` has a match. Everyone else stays in the list.
-- Headquarters are approximate and are not claimed by models.dev.
-
-models.dev data stays under its own license. This application is MIT. See `LICENSE`.
+The models.dev catalog data is MIT licensed (© 2025 models.dev). Modex also bundles three.js (MIT), d3-geo, d3-array, topojson-client and world-atlas (ISC), the IBM Plex Mono font (SIL Open Font License), and Natural Earth map data (public domain). Their notices are in [public/third-party-notices.txt](public/third-party-notices.txt), which ships with the site at `/third-party-notices.txt`.
