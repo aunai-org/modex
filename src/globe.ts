@@ -195,13 +195,20 @@ function around(center: THREE.Vector3, index: number, count: number, radius: num
 }
 
 const ARC_STEPS = 48;
+/** Arcs draw out from the lab over this long, one after another. */
+const ARC_MS = 650;
+const ARC_STAGGER_MS = 70;
+
+const easeOut = (k: number) => 1 - Math.pow(1 - k, 3);
+/** A small overshoot, so a provider pops in as its arc lands. */
+const popIn = (k: number) => (k <= 0 ? 0 : k >= 1 ? 1 : 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2));
 
 /** Redraw an arc between two marker positions: a raised great circle, or a short tether when they're close. */
 function bend(line: THREE.Line, a: THREE.Vector3, b: THREE.Vector3) {
   const attr = line.geometry.getAttribute("position") as THREE.BufferAttribute;
   const ua = a.clone().normalize();
   const ub = b.clone().normalize();
-  const lift = ua.angleTo(ub) * 0.22;
+  const lift = Math.min(ua.angleTo(ub) * 0.18, 0.16);
   const ra = a.length();
   const rb = b.length();
   const p = new THREE.Vector3();
@@ -269,6 +276,8 @@ export class Globe {
   private spider: { center: THREE.Vector3; ids: string[]; dist: number; hub?: string } | null = null;
   /** The ring around the current selection, as of the last frame. */
   private lastRing: { center: THREE.Vector3; ids: string[]; hub: string } | null = null;
+  /** Arcs already on screen; only new ones animate, so a re-render doesn't replay them. */
+  private arcKeys = new Set<string>();
   private tip: HTMLElement;
   private hover: [number, number] | null = null;
 
@@ -341,7 +350,10 @@ export class Globe {
   show(pins: Pin[], arcs: Arc[]) {
     this.clear();
     const present = new Set(pins.map((pin) => `${pin.kind}:${pin.id}`));
-    if (this.spider) {
+    if (pins.some((pin) => pin.anchor)) {
+      // A new selection rings its own neighbours; an older fan-out would leave some of them clustered on top of it.
+      this.spider = null;
+    } else if (this.spider) {
       // Keep an open fan-out while its pins are still on the map.
       const ids = this.spider.ids.filter((id) => present.has(id));
       this.spider = ids.length > 1 ? { ...this.spider, ids } : null;
@@ -354,7 +366,17 @@ export class Globe {
       // A fanned model's home is its lab; layout() rings it around that point.
       this.add(pin, toVector(pin.lat, pin.lng, RADIUS + (pin.kind === "host" ? 0.05 : 0.02)));
     }
-    for (const arc of arcs) this.arcs.add(arcLine(arc));
+    const now = performance.now();
+    const next = new Set<string>();
+    let order = 0;
+    for (const arc of arcs) {
+      const line = arcLine(arc);
+      const id = `${line.userData.from}>${line.userData.to}`;
+      next.add(id);
+      line.userData.born = this.arcKeys.has(id) ? -Infinity : now + order++ * ARC_STAGGER_MS;
+      this.arcs.add(line);
+    }
+    this.arcKeys = next;
   }
 
   /** Turn the globe to face a place. Keeps the current zoom unless a distance is given. */
@@ -528,9 +550,22 @@ export class Globe {
       pool[i].userData.ring.visible = false;
     }
 
+    // Arcs grow out from the lab; each provider pops in as its arc lands. Settled arcs cost nothing extra.
+    const now = t * 1000;
+    const landing = new Map<string, number>();
+    for (const line of this.arcs.children as THREE.Line[]) {
+      const elapsed = now - (line.userData.born as number);
+      const grow = Math.min(Math.max(elapsed / ARC_MS, 0), 1);
+      line.geometry.setDrawRange(0, Math.round(easeOut(grow) * (ARC_STEPS + 1)));
+      if (grow < 1 || elapsed < ARC_MS * 1.2) {
+        landing.set(line.userData.to as string, Math.min(Math.max((elapsed - ARC_MS * 0.8) / 260, 0), 1));
+      }
+    }
+
     for (const m of markers) {
       const d = m.userData;
-      const size = worldSize(m.position, MARKER_PX[d.kind] * TONE_SCALE[d.tone]);
+      const arrive = landing.get(key(m));
+      const size = worldSize(m.position, MARKER_PX[d.kind] * TONE_SCALE[d.tone]) * (arrive === undefined ? 1 : popIn(arrive));
       m.scale.set(size, size, 1);
       if (d.ring) {
         d.ring.visible = m.visible;

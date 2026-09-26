@@ -1,14 +1,11 @@
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
-import "@fontsource/ibm-plex-mono/600.css";
-import "./style.css";
 import { Globe, type Arc, type Pin, type Tone } from "./globe";
 import { locate } from "./places";
 import type { CatalogBody, Host, Lab, ModelRow, Serve } from "../shared/catalog";
 
 const RECENT_MS = 15 * 24 * 60 * 60 * 1000;
 const MODEL_CAP = 12;
-const LATEST_CAP = 30;
+const LATEST_CAP = 50;
+const LATEST_DAYS = 7;
 
 const statusEl = document.querySelector("#status") as HTMLElement;
 const clockEl = document.querySelector("#clock") as HTMLElement;
@@ -19,6 +16,7 @@ const allEl = document.querySelector("#win-all") as HTMLButtonElement;
 const refreshEl = document.querySelector("#refresh") as HTMLButtonElement;
 const latestEl = document.querySelector("#latest") as HTMLElement;
 const filtersEl = document.querySelector(".filters") as HTMLDetailsElement;
+const appEl = document.querySelector("#app") as HTMLElement;
 const SHORT_PX = 640;
 if (window.innerHeight < SHORT_PX) (latestEl.closest("details") as HTMLDetailsElement).open = false;
 
@@ -79,6 +77,11 @@ function recent(model: ModelRow): boolean {
   if (!model.release) return false;
   const time = Date.parse(`${model.release}T00:00:00Z`);
   return Number.isFinite(time) && Date.now() - time <= RECENT_MS && Date.now() >= time;
+}
+
+function within(model: ModelRow, days: number): boolean {
+  const time = Date.parse(`${model.release}T00:00:00Z`);
+  return Number.isFinite(time) && Date.now() >= time && Date.now() - time <= days * 86400000;
 }
 
 function ago(release: string): string {
@@ -245,18 +248,21 @@ function paintCounts(shownLabs: Lab[], pinnedHosts: Host[]) {
   else statusEl.textContent = `${models.length} models · ${hosts.length} providers loaded`;
 }
 
+/** Latest lists recent releases: 7 days by default, 15 when the 15-day window is on. */
 function paintLatest(q: string) {
+  const days = recentOnly ? 15 : LATEST_DAYS;
   const labName = new Map(labs.map((lab) => [lab.id, lab.name]));
   const rows = (show.model ? models : [])
-    .filter((model) => model.release && (!recentOnly || recent(model)))
+    .filter((model) => model.release && within(model, days))
     .filter((model) => !q || model.lab.includes(q) || (labName.get(model.lab) ?? "").toLowerCase().includes(q))
     .slice(0, LATEST_CAP);
   setText("#latest-count", String(rows.length));
+  setText("#latest-window", `${days} days`);
   latestEl.replaceChildren();
   if (!rows.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = show.model ? "No models match." : "Models are hidden.";
+    li.textContent = show.model ? `No releases in the last ${days} days.` : "Models are hidden.";
     latestEl.append(li);
     return;
   }
@@ -407,6 +413,7 @@ async function load() {
   }
   refreshEl.classList.remove("spin");
   refreshEl.disabled = false;
+  appEl.dataset.state = "ready";
   render();
 }
 

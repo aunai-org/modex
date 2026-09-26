@@ -6,9 +6,11 @@
     <meta name="theme-color" content="#000000">
     <title>Modex — Model index</title>
     <meta name="description" content="Labs, models, and the providers that serve them, on a dark Earth.">
+    <link rel="stylesheet" href="/src/style.css">
   </head>
   <body>
-    <div id="app">
+    <div id="app" data-state="loading">
+      <div class="boot" role="status" aria-live="polite"><i class="dot" aria-hidden="true"></i><span>MODEX</span><small id="boot-msg">Loading catalog…</small></div>
       <div id="globe" aria-label="Globe of model labs"></div>
 
       <header class="topbar">
@@ -60,7 +62,7 @@
       </details>
 
       <details class="panel latest" open>
-        <summary>Latest <b id="latest-count">0</b></summary>
+        <summary>Latest <small id="latest-window">7 days</small><b id="latest-count">0</b></summary>
         <ol id="latest"></ol>
       </details>
 

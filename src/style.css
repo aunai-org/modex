@@ -1,3 +1,7 @@
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 :root {
   color-scheme: dark;
   --bg: #000;
@@ -82,6 +86,7 @@ button { cursor: pointer; }
 .panel summary::before { content: "▸"; color: var(--muted); font-size: 9px; }
 .panel[open] summary::before { content: "▾"; }
 .panel summary b { margin-left: auto; font-weight: 400; color: var(--muted); }
+.panel summary small { color: var(--faint); font-size: 9px; letter-spacing: 0.08em; text-transform: none; }
 .panel[open] summary { margin-bottom: 8px; }
 
 /* Filters */
@@ -263,3 +268,25 @@ button { cursor: pointer; }
   .hint { display: none; }
   .filters, .latest { bottom: 16px; }
 }
+
+/* Boot: nothing but the brand until the catalog arrives, then the UI fades in. */
+.boot {
+  position: fixed;
+  z-index: 5;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  background: var(--bg);
+  letter-spacing: 0.22em;
+  font-size: 12px;
+  font-weight: 500;
+  transition: opacity 0.5s ease, visibility 0.5s;
+}
+.boot .dot { width: 9px; height: 9px; animation: breathe 1.2s ease-in-out infinite; }
+.boot small { color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: 0.08em; }
+@keyframes breathe { 50% { opacity: 0.25; transform: scale(0.7); } }
+#app[data-state="ready"] .boot { opacity: 0; visibility: hidden; }
+.panel, .card, .hint, .topbar-right { transition: opacity 0.4s ease; }
+#app[data-state="loading"] :is(.panel, .card, .hint, .topbar-right) { opacity: 0; pointer-events: none; }
