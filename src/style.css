@@ -232,12 +232,7 @@ button { cursor: pointer; }
   .filters { width: 180px; }
 }
 
-@media (max-width: 600px) {
-  .latest { display: none; }
-  .filters { bottom: 30px; width: calc(100vw - 32px); }
-  .legend { grid-template-columns: 1fr 1fr; }
-  .card { max-height: calc(100vh - 300px); }
-}
+
 
 /* Hover label on globe markers */
 .tip {
@@ -290,3 +285,21 @@ button { cursor: pointer; }
 #app[data-state="ready"] .boot { opacity: 0; visibility: hidden; }
 .panel, .card, .hint, .topbar-right { transition: opacity 0.4s ease; }
 #app[data-state="loading"] :is(.panel, .card, .hint, .topbar-right) { opacity: 0; pointer-events: none; }
+
+/* Phones: panels share the bottom edge, and the card is a bottom sheet that hides them while open. */
+@media (max-width: 600px) {
+  .filters, .latest { bottom: 30px; width: calc(50vw - 22px); }
+  .filters { left: 16px; }
+  .latest { right: 16px; }
+  .card {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 46vh;
+    border-radius: 12px 12px 0 0;
+    border-bottom: 0;
+  }
+  #app[data-card="open"] :is(.panel, .hint) { display: none; }
+}

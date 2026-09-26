@@ -12,8 +12,12 @@ const FLIGHT_MS = 700;
 /** Pins closer than this on screen merge into one cluster badge. */
 const CLUSTER_PX = 26;
 /** Ring radii in CSS pixels: models around their lab, and pins fanned around a point. */
-const FAN_PX = 56;
-const RING_MIN_PX = 30;
+const FAN_PX = 40;
+const RING_MIN_PX = 26;
+/** Room each pin needs on a ring around a selection. */
+const SLOT_PX = 19;
+/** Compact screens: below this width markers draw smaller. */
+const SMALL_PX = 700;
 
 export type Kind = "lab" | "model" | "host";
 
@@ -35,6 +39,8 @@ export type Pin = {
   fan?: { index: number; count: number; lab: string };
   /** The selected place: never clustered, and nearby pins ring around it. */
   anchor?: boolean;
+  /** Tracked but not drawn (a lab hidden while something else is selected). */
+  ghost?: boolean;
 };
 
 /** A link between two pins; it follows them wherever layout() draws them. */
@@ -241,6 +247,7 @@ type Marker = THREE.Sprite & {
     home: THREE.Vector3;
     fan: { index: number; count: number; lab: string } | null;
     anchor: boolean;
+    ghost: boolean;
     ring: THREE.Mesh | null;
   };
 };
@@ -278,6 +285,10 @@ export class Globe {
   private lastRing: { center: THREE.Vector3; ids: string[]; hub: string } | null = null;
   /** Arcs already on screen; only new ones animate, so a re-render doesn't replay them. */
   private arcKeys = new Set<string>();
+  private compact = false;
+  /** Screen space covered by panels; the globe centres itself in what is left. */
+  private inset = { left: 0, bottom: 0 };
+  private shift = { x: 0, y: 0 };
   private tip: HTMLElement;
   private hover: [number, number] | null = null;
 
@@ -339,6 +350,7 @@ export class Globe {
       requestAnimationFrame(loop);
       const now = performance.now();
       this.fly(now);
+      this.offsetView();
       this.controls?.update();
       this.layout(now / 1000);
       this.hoverTip();
@@ -394,6 +406,31 @@ export class Globe {
     };
   }
 
+  /** Compact layout (small screens): capped rings, smaller markers, and a globe centred in the free area. */
+  setLayout(compact: boolean, inset: { left: number; bottom: number }) {
+    this.compact = compact;
+    this.inset = compact ? inset : { left: 0, bottom: 0 };
+  }
+
+  private markerScale(): number {
+    return this.compact && (this.renderer?.domElement.clientWidth ?? 1000) < SMALL_PX ? 0.85 : 1;
+  }
+
+  /** Ease the view offset toward the free area so a panel never sits on the selection. */
+  private offsetView() {
+    const w = Math.max(this.root.clientWidth, 1);
+    const h = Math.max(this.root.clientHeight, 1);
+    const tx = -this.inset.left / 2;
+    const ty = this.inset.bottom / 2;
+    if (Math.abs(tx - this.shift.x) < 0.5 && Math.abs(ty - this.shift.y) < 0.5 && tx === this.shift.x && ty === this.shift.y) return;
+    this.shift.x += (tx - this.shift.x) * 0.15;
+    this.shift.y += (ty - this.shift.y) * 0.15;
+    if (Math.abs(tx - this.shift.x) < 0.5) this.shift.x = tx;
+    if (Math.abs(ty - this.shift.y) < 0.5) this.shift.y = ty;
+    if (this.shift.x === 0 && this.shift.y === 0) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(w, h, this.shift.x, this.shift.y, w, h);
+  }
+
   /** Turn and zoom so every given place is in view. */
   frame(spots: { lat: number; lng: number }[]) {
     if (!spots.length) return;
@@ -433,13 +470,17 @@ export class Globe {
     const facing = (at: THREE.Vector3) => this.scratch.copy(at).setLength(RADIUS).dot(cam) - horizon > 0;
     const worldSize = (at: THREE.Vector3, px: number) => px * perPx * at.distanceTo(cam);
 
-    const ringPx = (n: number) => Math.max(RING_MIN_PX, 12 + n * 6);
+    // Rings scale with the window: tighter on small screens, capped on large ones.
+    const unit = Math.min(Math.max(Math.min(width, height) / 800, 0.6), 1);
+    const ringPx = (n: number) => Math.max(RING_MIN_PX, 10 + n * 5) * unit;
+    const fanPx = (n: number) => (FAN_PX + n * 1.5) * unit;
     const screen = (at: THREE.Vector3) => {
       const p = this.scratch.copy(at).project(this.camera);
       return { x: ((p.x + 1) / 2) * width, y: ((1 - p.y) / 2) * height };
     };
 
-    if (this.spider && cam.length() > this.spider.dist + 0.35) this.spider = null;
+    // Zooming out closes a fan-out, but not while a flight is still carrying the camera in.
+    if (this.spider && !this.flight && cam.length() > this.spider.dist + 0.35) this.spider = null;
     const spun = new Map<string, THREE.Vector3>();
     if (this.spider) {
       const { center, ids, hub } = this.spider;
@@ -450,22 +491,28 @@ export class Globe {
     }
 
     const markers = this.markers.children as Marker[];
-    // The selection's neighbours ring around it, so nothing hides under the selected pin.
-    // Remember that ring: if the selection is cleared, it stays open instead of re-clustering.
+    // The selection's neighbours ring around it, just outside its model ring, so nothing hides under it.
+    // Remember that ring, plus any hidden labs beside it: clearing the selection leaves them fanned out.
     this.lastRing = null;
     const anchor = markers.find((m) => m.userData.anchor && facing(m.userData.home));
     if (anchor && !spun.has(key(anchor))) {
       const at = screen(anchor.userData.home);
-      const near = markers.filter((m) => {
-        const d = m.userData;
-        if (m === anchor || d.fan || spun.has(key(m)) || !facing(d.home)) return false;
-        const p = screen(d.home);
+      const close = (m: Marker) => {
+        const p = screen(m.userData.home);
         return Math.hypot(p.x - at.x, p.y - at.y) <= CLUSTER_PX;
-      });
-      const r = worldSize(anchor.userData.home, ringPx(near.length));
+      };
+      const candidates = markers.filter(
+        (m) => m !== anchor && !m.userData.fan && !spun.has(key(m)) && facing(m.userData.home) && close(m),
+      );
+      const near = candidates.filter((m) => !m.userData.ghost);
+      const fanCount = markers.filter((m) => m.userData.fan).length;
+      // Big enough that every neighbour gets its own slot, and never inside the model ring.
+      const slots = (near.length * SLOT_PX) / (2 * Math.PI);
+      const ringR = Math.max(fanCount ? fanPx(fanCount) + 16 * unit : ringPx(near.length), slots);
+      const r = worldSize(anchor.userData.home, ringR);
       near.forEach((m, i) => spun.set(key(m), around(anchor.userData.home, i, near.length, r, 0.05)));
-      if (near.length) {
-        this.lastRing = { center: anchor.userData.home.clone(), hub: key(anchor), ids: [key(anchor), ...near.map(key)] };
+      if (candidates.length) {
+        this.lastRing = { center: anchor.userData.home.clone(), hub: key(anchor), ids: [key(anchor), ...candidates.map(key)] };
       }
     }
 
@@ -477,13 +524,14 @@ export class Globe {
       const d = m.userData;
       if (d.fan) {
         const center = drawn.get(`lab:${d.fan.lab}`) ?? d.home;
-        const r = worldSize(center, FAN_PX + d.fan.count * 2);
+        const r = worldSize(center, fanPx(d.fan.count));
         m.position.copy(around(center, d.fan.index, d.fan.count, r));
       } else {
         m.position.copy(spun.get(key(m)) ?? d.home);
         drawn.set(key(m), m.position);
       }
-      m.visible = facing(d.fan ? d.home : m.position);
+      // Ghosts are labs hidden while something is selected: tracked, never drawn.
+      m.visible = !d.ghost && facing(d.fan ? d.home : m.position);
       if (m.visible && !d.fan && !d.anchor && d.tone !== "focus" && !spun.has(key(m))) {
         loose.push({ m, ...screen(m.position) });
       }
@@ -511,7 +559,7 @@ export class Globe {
     groups.forEach((group, i) => {
       for (const m of group) m.visible = false;
       const center = new THREE.Vector3();
-      for (const m of group) center.add(m.userData.home.clone().normalize());
+      for (const m of group) center.add(m.position.clone().normalize());
       center.setLength(RADIUS + 0.06);
       const tone = group[0].userData.tone;
       const labs = group.filter((m) => m.userData.kind === "lab");
@@ -540,7 +588,7 @@ export class Globe {
       b.userData.ring.visible = group.some((m) => m.userData.ring);
       b.userData.ring.position.copy(center);
       b.userData.ring.lookAt(center.clone().multiplyScalar(2));
-      const px = 26 * (tone === "dim" ? 0.8 : 1);
+      const px = 26 * (tone === "dim" ? 0.8 : 1) * this.markerScale();
       const size = worldSize(center, px);
       b.scale.set(size, size, 1);
       this.pulse(b.userData.ring, size, t, 0);
@@ -565,7 +613,8 @@ export class Globe {
     for (const m of markers) {
       const d = m.userData;
       const arrive = landing.get(key(m));
-      const size = worldSize(m.position, MARKER_PX[d.kind] * TONE_SCALE[d.tone]) * (arrive === undefined ? 1 : popIn(arrive));
+      const size =
+        worldSize(m.position, MARKER_PX[d.kind] * TONE_SCALE[d.tone] * this.markerScale()) * (arrive === undefined ? 1 : popIn(arrive));
       m.scale.set(size, size, 1);
       if (d.ring) {
         d.ring.visible = m.visible;
@@ -694,6 +743,7 @@ export class Globe {
       home,
       fan: pin.fan ?? null,
       anchor: pin.anchor === true,
+      ghost: pin.ghost === true,
       ring: pin.ripple ? this.ring(pin.tone === "focus" ? 0xf5a04a : 0xf4f4f4) : null,
     };
     this.markers.add(sprite);
@@ -729,11 +779,9 @@ export class Globe {
     const dist = this.camera.position.length();
     const min = this.controls?.minDistance ?? 3.1;
     const { lat, lng } = toLatLng(center);
-    if (dist > min + 0.25) {
-      this.focus(lat, lng, Math.max(min, RADIUS + (dist - RADIUS) * 0.5));
-    } else {
-      this.focus(lat, lng);
-      this.spider = { center: center.clone(), ids, dist };
-    }
+    // One click: zoom in and fan the group out together.
+    const target = Math.max(min, RADIUS + (dist - RADIUS) * 0.55);
+    this.focus(lat, lng, target);
+    this.spider = { center: center.clone(), ids, dist: target };
   }
 }

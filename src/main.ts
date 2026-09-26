@@ -18,7 +18,13 @@ const latestEl = document.querySelector("#latest") as HTMLElement;
 const filtersEl = document.querySelector(".filters") as HTMLDetailsElement;
 const appEl = document.querySelector("#app") as HTMLElement;
 const SHORT_PX = 640;
-if (window.innerHeight < SHORT_PX) (latestEl.closest("details") as HTMLDetailsElement).open = false;
+const COMPACT_PX = 1000;
+const SHEET_PX = 600;
+// Small screens start with the side panels folded, so the globe is what you see first.
+if (window.innerHeight < SHORT_PX || window.innerWidth < COMPACT_PX) {
+  (latestEl.closest("details") as HTMLDetailsElement).open = false;
+  filtersEl.open = false;
+}
 
 let labs: Lab[] = [];
 let models: ModelRow[] = [];
@@ -31,6 +37,8 @@ let modelId: string | null = null;
 let hostId: string | null = null;
 let fetchedAt = "";
 let notice = "";
+/** Compact screens: a lab shows its providers only after its card link asks for them. */
+let revealFor: string | null = null;
 
 type Category = "lab" | "model" | "host" | "pulse";
 const show: Record<Category, boolean> = { lab: true, model: true, host: false, pulse: true };
@@ -57,6 +65,7 @@ const globe = new Globe(
   () => {
     // Clicking empty globe drops the selection and closes the card.
     if (!labId && !modelId && !hostId) return;
+    revealFor = null;
     labId = null;
     modelId = null;
     hostId = null;
@@ -134,7 +143,7 @@ function render() {
     relatedHosts = [openHost];
   } else if (openLab) {
     relatedLabs = new Set([openLab.id]);
-    relatedHosts = hostsServing(labModels(openLab.id));
+    relatedHosts = !compact() || revealFor === openLab.id ? hostsServing(labModels(openLab.id)) : [];
   }
   const selecting = relatedLabs !== null;
 
@@ -149,6 +158,8 @@ function render() {
       kind: "lab",
       label: lab.name,
       anchor: lab.id === labId && !hostId,
+      // Other labs step off the map while something is selected; clearing the selection brings them back.
+      ghost: tone === "dim",
       tone,
       lat: place.lat,
       lng: place.lng,
@@ -164,6 +175,7 @@ function render() {
     const where = locate(host.id, host.name);
     if (!where) continue;
     const tone: Tone = host.id === hostId ? "focus" : !selecting || relatedHostIds.has(host.id) ? "related" : "dim";
+    if (tone === "dim") continue;
     pins.push({
       id: host.id,
       kind: "host",
@@ -212,18 +224,40 @@ function render() {
  */
 let lastCard = "";
 function fitPanels() {
-  const short = window.innerHeight < SHORT_PX;
+  const tight = window.innerHeight < SHORT_PX || compact();
   const card = cardEl.hidden ? "" : `${labId}|${modelId}|${hostId}`;
-  if (short && card && card !== lastCard) {
+  appEl.dataset.card = card ? "open" : "closed";
+  if (tight && card && card !== lastCard) {
     filtersEl.open = false;
     (latestEl.closest("details") as HTMLDetailsElement).open = false;
   }
   lastCard = card;
   capCard();
+  placeGlobe();
+}
+
+function compact(): boolean {
+  return window.innerWidth < COMPACT_PX;
+}
+
+function sheet(): boolean {
+  return window.innerWidth < SHEET_PX;
+}
+
+/** Compact screens: centre the globe in the space the card leaves free. */
+function placeGlobe() {
+  const box = cardEl.hidden ? null : cardEl.getBoundingClientRect();
+  const inset = !box ? { left: 0, bottom: 0 } : sheet() ? { left: 0, bottom: box.height } : { left: box.right, bottom: 0 };
+  globe.setLayout(compact(), inset);
 }
 
 /** The card and the filters share the left edge; the card stops above the filters. */
 function capCard() {
+  if (sheet()) {
+    // Bottom sheet: its height comes from CSS.
+    cardEl.style.maxHeight = "";
+    return;
+  }
   const room = filtersEl.getBoundingClientRect().top - cardEl.getBoundingClientRect().top - 10;
   cardEl.style.maxHeight = `${Math.max(room, 120)}px`;
 }
@@ -349,6 +383,18 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], o
     sub.textContent = `inspect lab ${lab.id}`;
     addFact(body, "HQ", hq(lab.id, lab.name));
     addFact(body, "Newest", labModels(lab.id)[0]?.name ?? "—");
+    const served = hostsServing(labModels(lab.id));
+    const mapped = served.filter((item) => locate(item.id, item.name));
+    const summary = `${served.length} · ${mapped.length} on map`;
+    if (mapped.length) {
+      addFact(body, "Providers", summary, () => {
+        revealFor = lab.id;
+        render();
+        frameProviders(lab, mapped);
+      });
+    } else {
+      addFact(body, "Providers", summary);
+    }
     addFact(body, "About", lab.description || "—");
   }
 }
@@ -460,6 +506,9 @@ document.querySelector("#card-close")?.addEventListener("click", () => {
 });
 
 filtersEl.addEventListener("toggle", capCard);
-window.addEventListener("resize", capCard);
+window.addEventListener("resize", () => {
+  capCard();
+  render();
+});
 
 void load();
