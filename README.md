@@ -2,6 +2,8 @@
 
 **The [models.dev](https://models.dev) index, on a map.**
 
+![Modex showing Claude Opus 5.5 with arcs from Anthropic to the providers that serve it](docs/media/model-providers.png)
+
 Modex puts the AI model world on a globe. Every AI lab sits where it's based. Click one and its models fan out around it. Pick a model and you'll see arcs reaching out to every provider that serves it, from the lab's own API to cloud platforms and gateways around the world.
 
 It's a small, fast way to answer questions like *"who actually serves this model?"* or *"what did this lab release lately?"*, without reading through a catalog.
@@ -15,6 +17,27 @@ It's a small, fast way to answer questions like *"who actually serves this model
 - **Make it yours.** Filter by category, search for a lab, and turn on the optional sound effects.
 
 It works on phones too, and it remembers the last catalog it loaded, so return visits open instantly (even offline).
+
+## A quick look
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/arcs.gif" alt="Selecting GPT-6 Luna: arcs draw out from OpenAI to each provider, which pop in as they land"></td>
+    <td width="50%"><img src="docs/media/lab-models.png" alt="Alibaba selected in Hangzhou, its newest models ringed around it and nearby providers pinned"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Pick a model and arcs draw out to every provider that serves it.</sub></td>
+    <td align="center"><sub>Pick a lab and its newest models ring around it.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/rotate.gif" alt="Dragging the globe: labs group into numbered badges while stars and the Milky Way turn behind it"></td>
+    <td width="50%" align="center"><img src="docs/media/phone.png" alt="On a phone, the model card opens as a bottom sheet below the globe" width="240"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Drag to spin the globe. Nearby labs group into numbered badges.</sub></td>
+    <td align="center"><sub>On phones, details open as a bottom sheet.</sub></td>
+  </tr>
+</table>
 
 ## Run it locally
 
