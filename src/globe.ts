@@ -348,6 +348,14 @@ export class Globe {
     canvas.addEventListener("pointermove", (event) => {
       this.hover = event.buttons ? null : [event.clientX, event.clientY];
     });
+    // Scrolling out re-stacks an open fan-out, even at the zoom limit where the camera cannot move further.
+    canvas.addEventListener(
+      "wheel",
+      (event) => {
+        if (event.deltaY > 0) this.spider = null;
+      },
+      { passive: true },
+    );
     canvas.addEventListener("pointerleave", () => {
       this.hover = null;
     });
@@ -498,7 +506,11 @@ export class Globe {
     };
 
     // Zooming out closes a fan-out, but not while a flight is still carrying the camera in.
-    if (this.spider && !this.flight && cam.length() > this.spider.dist + 0.35) this.spider = null;
+    // A fan-out measures from the closest zoom since it opened, so zooming out from there always re-stacks it.
+    if (this.spider && !this.flight) {
+      this.spider.dist = Math.min(this.spider.dist, cam.length());
+      if (cam.length() > this.spider.dist + 0.35) this.spider = null;
+    }
     const spun = new Map<string, THREE.Vector3>();
     if (this.spider) {
       const { center, ids, hub } = this.spider;
