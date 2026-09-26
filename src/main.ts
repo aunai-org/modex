@@ -1,5 +1,6 @@
 import { Globe, type Arc, type Pin, type Tone } from "./globe";
 import { locate } from "./places";
+import { modeCopy } from "./mode";
 import { cueCard, cueClear, cueCluster, cueLand, cueModel, cueProvider, cueTick, setSound, soundOn } from "./sound";
 import type { CatalogBody, Host, Lab, ModelRow, Serve } from "../shared/catalog";
 
@@ -18,6 +19,22 @@ const refreshEl = document.querySelector("#refresh") as HTMLButtonElement;
 const latestEl = document.querySelector("#latest") as HTMLElement;
 const filtersEl = document.querySelector(".filters") as HTMLDetailsElement;
 const appEl = document.querySelector("#app") as HTMLElement;
+
+// Mode-dependent wording: how fresh the data is and what refresh can do.
+setText("#freshness", modeCopy.freshness);
+refreshEl.title = modeCopy.refreshLabel;
+refreshEl.setAttribute("aria-label", modeCopy.refreshLabel);
+
+/** While set, the top-bar time shows a short message instead of the catalog time. */
+let clockHold = 0;
+function flashClock(message: string) {
+  window.clearTimeout(clockHold);
+  clockEl.textContent = message;
+  clockHold = window.setTimeout(() => {
+    clockHold = 0;
+    clockEl.textContent = fetchedAt ? modeCopy.stamp(new Date(fetchedAt)) : "";
+  }, 3500);
+}
 const SHORT_PX = 640;
 const COMPACT_PX = 1000;
 const SHEET_PX = 600;
@@ -281,8 +298,7 @@ function paintCounts(shownLabs: Lab[], pinnedHosts: Host[]) {
   setText("#count-models", String(recentOnly ? fresh : models.length));
   setText("#count-hosts", String(pinnedHosts.filter((host) => locate(host.id, host.name)).length));
   setText("#count-pulse", String(fresh));
-  const time = fetchedAt ? new Date(fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-  clockEl.textContent = time ? `Updated ${time}` : "";
+  if (!clockHold) clockEl.textContent = fetchedAt ? modeCopy.stamp(new Date(fetchedAt)) : "";
   if (!globe.ready) statusEl.textContent = "WebGL is unavailable.";
   else if (notice) statusEl.textContent = notice;
   else statusEl.textContent = `${labs.length} labs · ${models.length} models · ${hosts.length} providers`;
@@ -487,6 +503,7 @@ async function load(options: { quiet?: boolean; force?: boolean } = {}) {
     if (!res.ok) throw new Error(String(res.status));
     const body = (await res.json()) as CatalogBody;
     const changed = body.fetchedAt !== fetchedAt;
+    if (options.force && !changed) flashClock(modeCopy.upToDate());
     const before = notice;
     if (body.labs?.length) {
       useCatalog(body);

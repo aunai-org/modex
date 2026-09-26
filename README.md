@@ -37,6 +37,8 @@ In static mode a failed fetch fails the build on purpose, so Cloudflare keeps se
 
 Locally: `npm run build` for static, `CATALOG_MODE=function npm run build` for function mode. `npm run dev` serves both URLs.
 
+The UI follows the mode: the About panel says how often data changes, the time beside the buttons reads "Data from" (build time) or "Updated", and the refresh button either checks for a newer build or refetches. All of that wording lives in `src/mode.ts`; the rebuild hours there must match the cron in `.github/workflows/rebuild.yml`.
+
 ### Rebuild every 12 hours (static mode)
 
 `.github/workflows/rebuild.yml` calls a Cloudflare deploy hook at 00:00 and 12:00 UTC:

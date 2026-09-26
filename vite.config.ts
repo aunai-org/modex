@@ -41,6 +41,6 @@ function catalog(): Plugin {
 
 export default defineConfig({
   plugins: [catalog()],
-  define: { __CATALOG_URL__: JSON.stringify(catalogUrl) },
+  define: { __CATALOG_URL__: JSON.stringify(catalogUrl), __CATALOG_MODE__: JSON.stringify(mode) },
   server: { port: Number(env.PORT) || 5173 },
 });
