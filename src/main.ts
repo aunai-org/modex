@@ -2,15 +2,13 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 import "./style.css";
-import { Globe, type GeoPin, type SatPin } from "./globe";
+import { Globe, type Arc, type Pin, type Tone } from "./globe";
 import { locate } from "./places";
 import type { CatalogBody, Host, Lab, ModelRow, Serve } from "../shared/catalog";
 
 const RECENT_MS = 15 * 24 * 60 * 60 * 1000;
 const MODEL_CAP = 12;
 const LATEST_CAP = 30;
-const CROWD_DEG = 3;
-const SPREAD_DEG = 2.2;
 
 const statusEl = document.querySelector("#status") as HTMLElement;
 const clockEl = document.querySelector("#clock") as HTMLElement;
@@ -20,6 +18,9 @@ const recentEl = document.querySelector("#recent") as HTMLButtonElement;
 const allEl = document.querySelector("#win-all") as HTMLButtonElement;
 const refreshEl = document.querySelector("#refresh") as HTMLButtonElement;
 const latestEl = document.querySelector("#latest") as HTMLElement;
+const filtersEl = document.querySelector(".filters") as HTMLDetailsElement;
+const SHORT_PX = 640;
+if (window.innerHeight < SHORT_PX) (latestEl.closest("details") as HTMLDetailsElement).open = false;
 
 let labs: Lab[] = [];
 let models: ModelRow[] = [];
@@ -34,7 +35,7 @@ let fetchedAt = "";
 let notice = "";
 
 type Category = "lab" | "model" | "host" | "pulse";
-const show: Record<Category, boolean> = { lab: true, model: true, host: true, pulse: true };
+const show: Record<Category, boolean> = { lab: true, model: true, host: false, pulse: true };
 
 const globe = new Globe(document.querySelector("#globe") as HTMLElement, (id, kind) => {
   if (kind === "lab") {
@@ -89,26 +90,12 @@ function hostsServing(list: ModelRow[]): Host[] {
   return hosts.filter((host) => ids.has(host.id));
 }
 
-/** Pins in the same metro area spiral out from its first pin instead of stacking. */
-function spreader() {
-  const crowd = new Map<string, { lat: number; lng: number; n: number }>();
-  return (lat: number, lng: number) => {
-    const key = `${Math.round(lat / CROWD_DEG)}:${Math.round(lng / CROWD_DEG)}`;
-    const seen = crowd.get(key);
-    if (!seen) {
-      crowd.set(key, { lat, lng, n: 1 });
-      return { lat, lng };
-    }
-    const n = seen.n++;
-    const angle = n * 2.4;
-    const step = SPREAD_DEG * Math.sqrt(n);
-    return {
-      lat: seen.lat + Math.sin(angle) * step,
-      lng: seen.lng + (Math.cos(angle) * step) / Math.max(Math.cos((seen.lat * Math.PI) / 180), 0.2),
-    };
-  };
-}
-
+/**
+ * Context decides what is on the map:
+ * nothing selected → labs (plus every provider when "All providers" is on);
+ * lab → providers serving its models; model → its providers, joined to the lab by arcs;
+ * provider → the labs it serves. Everything outside the context is dimmed.
+ */
 function render() {
   const q = query.trim().toLowerCase();
   const shownLabs = labs.filter((lab) => {
@@ -116,58 +103,109 @@ function render() {
     if (recentOnly && !labModels(lab.id).length) return false;
     return locate(lab.id, lab.name) !== null;
   });
-  const geo: GeoPin[] = [];
-  const spot = spreader();
-  const labSpot = new Map<string, { lat: number; lng: number }>();
+  const visible = shownLabs.flatMap((lab) => labModels(lab.id));
+  const openLab = labs.find((lab) => lab.id === labId) ?? null;
+  const openModel = models.find((model) => model.id === modelId) ?? null;
+  const openHost = hosts.find((host) => host.id === hostId) ?? null;
+  const openHosts = openModel ? hostsFor(openModel.id) : [];
+
+  let relatedLabs: Set<string> | null = null;
+  let relatedHosts: Host[] = [];
+  if (openModel) {
+    relatedLabs = new Set([openModel.lab]);
+    relatedHosts = openHosts;
+  } else if (openHost) {
+    const served = new Set(serves.filter((link) => link.host === openHost.id).map((link) => link.model));
+    relatedLabs = new Set(visible.filter((model) => served.has(model.id)).map((model) => model.lab));
+    relatedHosts = [openHost];
+  } else if (openLab) {
+    relatedLabs = new Set([openLab.id]);
+    relatedHosts = hostsServing(labModels(openLab.id));
+  }
+  const selecting = relatedLabs !== null;
+
+  const pins: Pin[] = [];
   for (const lab of show.lab ? shownLabs : []) {
     const place = locate(lab.id, lab.name);
     if (!place) continue;
-    const at = spot(place.lat, place.lng);
-    labSpot.set(lab.id, at);
-    geo.push({
+    const focus = lab.id === labId && !modelId && !hostId;
+    const tone: Tone = focus ? "focus" : !selecting || relatedLabs?.has(lab.id) ? "related" : "dim";
+    pins.push({
       id: lab.id,
       kind: "lab",
-      ...at,
-      ripple: show.pulse && labModels(lab.id).some(recent),
+      label: lab.name,
+      anchor: lab.id === labId && !hostId,
+      tone,
+      lat: place.lat,
+      lng: place.lng,
+      ripple: show.pulse && (focus || (tone !== "dim" && labModels(lab.id).some(recent))),
     });
   }
-  const openLab = labs.find((lab) => lab.id === labId) ?? null;
-  const spawned = openLab && show.model ? labModels(openLab.id).slice(0, MODEL_CAP) : [];
-  const place = openLab ? labSpot.get(openLab.id) ?? locate(openLab.id, openLab.name) : null;
-  const sats: SatPin[] = place
-    ? spawned.map((model, index) => ({
-        id: model.id,
-        lat: place.lat,
-        lng: place.lng,
-        index,
-        count: spawned.length,
-        ripple: show.pulse && recent(model),
-      }))
-    : [];
-  const openModel = models.find((model) => model.id === modelId) ?? null;
-  const openHosts = openModel ? hostsFor(openModel.id) : [];
-  // With a model open, pin who serves it. Otherwise pin every provider serving a visible lab's models.
-  const visible = shownLabs.flatMap((lab) => labModels(lab.id));
-  const pinnedHosts = openModel ? openHosts : hostsServing(visible);
-  if (show.host) {
-    const freshIds = new Set(visible.filter(recent).map((model) => model.id));
-    const freshHosts = new Set(serves.filter((link) => freshIds.has(link.model)).map((link) => link.host));
-    for (const host of pinnedHosts) {
-      const where = locate(host.id, host.name);
-      if (!where) continue;
-      geo.push({
-        id: host.id,
-        kind: "host",
-        ...spot(where.lat, where.lng),
-        ripple: show.pulse && (openModel ? recent(openModel) : freshHosts.has(host.id)),
-      });
+
+  const pinned = new Map(relatedHosts.map((host) => [host.id, host]));
+  if (show.host) for (const host of hostsServing(visible)) if (!pinned.has(host.id)) pinned.set(host.id, host);
+  const relatedHostIds = new Set(relatedHosts.map((host) => host.id));
+  const arcs: Arc[] = [];
+  const labPlace = openModel ? locate(openModel.lab, "") : null;
+  for (const host of pinned.values()) {
+    const where = locate(host.id, host.name);
+    if (!where) continue;
+    const tone: Tone = host.id === hostId ? "focus" : !selecting || relatedHostIds.has(host.id) ? "related" : "dim";
+    pins.push({
+      id: host.id,
+      kind: "host",
+      label: host.name,
+      anchor: host.id === hostId,
+      tone,
+      lat: where.lat,
+      lng: where.lng,
+      ripple: show.pulse && tone === "focus",
+    });
+    if (labPlace && relatedHostIds.has(host.id)) {
+      arcs.push({ fromLat: labPlace.lat, fromLng: labPlace.lng, toLat: where.lat, toLng: where.lng });
     }
   }
-  const selected = hostId ?? modelId ?? labId;
-  globe.show(geo, sats, selected);
-  paintCard(openLab, openModel, openHosts, pinnedHosts);
-  paintCounts(shownLabs, pinnedHosts);
+
+  const labHome = openLab ? locate(openLab.id, openLab.name) : null;
+  const spawned = labHome && show.model ? labModels(openLab!.id).slice(0, MODEL_CAP) : [];
+  // An older selected model still gets a place in the ring.
+  if (openModel && spawned.length && openModel.lab === openLab?.id && !spawned.includes(openModel)) {
+    spawned[spawned.length - 1] = openModel;
+  }
+  spawned.forEach((model, index) => {
+    const tone: Tone = model.id === modelId ? (hostId ? "related" : "focus") : modelId ? "dim" : "related";
+    pins.push({
+      id: model.id,
+      kind: "model",
+      label: model.name,
+      tone,
+      lat: labHome!.lat,
+      lng: labHome!.lng,
+      fan: { index, count: spawned.length },
+      ripple: show.pulse && tone === "focus",
+    });
+  });
+
+  globe.show(pins, arcs);
+  paintCard(openLab, openModel, openHosts, openHost);
+  paintCounts(shownLabs, [...pinned.values()]);
   paintLatest(q);
+  fitPanels();
+}
+
+/**
+ * Short windows can't fit the card and both panels. When a selection opens the card there,
+ * fold the side panels; the person can still reopen them.
+ */
+let lastCard = "";
+function fitPanels() {
+  const short = window.innerHeight < SHORT_PX;
+  const card = cardEl.hidden ? "" : `${labId}|${modelId}|${hostId}`;
+  if (short && card && card !== lastCard) {
+    filtersEl.open = false;
+    (latestEl.closest("details") as HTMLDetailsElement).open = false;
+  }
+  lastCard = card;
 }
 
 function setText(selector: string, value: string) {
@@ -239,8 +277,8 @@ function hq(id: string, name: string): string {
   return where ? `${where.city}, ${where.region} · approx.` : "No pin";
 }
 
-function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], pinnedHosts: Host[]) {
-  const host = (model ? openHosts : pinnedHosts).find((item) => item.id === hostId) ?? null;
+function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], openHost: Host | null) {
+  const host = model ? openHosts.find((item) => item.id === hostId) ?? null : openHost;
   cardEl.hidden = !lab && !model && !host;
   if (cardEl.hidden) return;
   const title = document.querySelector("#card-name") as HTMLElement;
@@ -366,7 +404,6 @@ document.querySelectorAll<HTMLButtonElement>(".legend button[data-cat]").forEach
       modelId = null;
       hostId = null;
     }
-    if (!show.host) hostId = null;
     render();
   });
 });

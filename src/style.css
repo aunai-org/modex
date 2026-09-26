@@ -219,3 +219,33 @@ button { cursor: pointer; }
   .legend { grid-template-columns: 1fr 1fr; }
   .card { max-height: calc(100vh - 300px); }
 }
+
+/* Hover label on globe markers */
+.tip {
+  position: absolute;
+  z-index: 4;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.tip::first-line { color: var(--title); font-weight: 500; }
+
+/* Panels never grow over the top bar, whatever the window height. */
+.filters { max-height: calc(100vh - 90px); overflow: auto; scrollbar-width: none; }
+.filters::-webkit-scrollbar { width: 0; height: 0; }
+
+@media (max-height: 640px) {
+  .card { max-height: calc(100vh - 130px); }
+  .panel { padding: 6px 8px 8px; }
+  .legend button { padding: 3px 6px; }
+  .seg { margin: 6px 0; }
+  .hint { display: none; }
+  .filters, .latest { bottom: 16px; }
+}
