@@ -1,0 +1,75 @@
+:root {
+  color-scheme: dark;
+  --bg: #0c0c0c;
+  --ink: #ececec;
+  --muted: #8d8d8d;
+  --line: #2a2a2a;
+  --panel: rgba(12, 12, 12, 0.86);
+  --accent: #f54e00;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+#globe { position: fixed; inset: 0; }
+#globe canvas { display: block; width: 100%; height: 100%; }
+
+.mast, .hud, .card {
+  position: fixed;
+  z-index: 2;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+
+.mast {
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 14px;
+}
+.mast b { font-weight: 500; letter-spacing: 0.08em; }
+.mast span { color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+
+.hud {
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px;
+}
+.hud input, .hud button {
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+}
+.hud input { width: 160px; }
+#recent.on { border-color: var(--accent); color: var(--accent); }
+.legend { margin: 0; color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+#status { color: var(--muted); font-size: 12px; font-family: "IBM Plex Mono", monospace; }
+.mark { width: 9px; height: 9px; display: inline-block; border: 1.5px solid #f4f4f4; }
+.mark.lab { border-radius: 2px; }
+.mark.model { transform: rotate(45deg); width: 7px; height: 7px; }
+.mark.host { border-radius: 50%; border-color: #9ecbff; }
+
+.card {
+  right: 16px;
+  top: 16px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+}
+.card header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.card h1 { margin: 0; font-size: 20px; font-weight: 500; }
+.card button { background: transparent; border: 0; font-size: 18px; }
+.eyebrow { margin: 0 0 4px; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+dl { margin: 12px 0 0; display: grid; gap: 8px; }
+dt { color: var(--muted); font-size: 12px; }
+dd { margin: 0; }
