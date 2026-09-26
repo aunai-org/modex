@@ -106,61 +106,61 @@ function render() {
   }
   const selected = hostId ?? modelId ?? labId;
   globe.show(geo, sats, selected);
-  paintCard(openLab, openModel, openHosts, spawned.length);
+  paintCard(openLab, openModel, openHosts);
   const fresh = models.filter(recent).length;
   statusEl.textContent = globe.ready
     ? `${shownLabs.length} labs · ${fresh} models in 15 days`
     : "WebGL is unavailable.";
 }
 
-function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], shown: number) {
+function yn(value: boolean): string {
+  return value ? "Yes" : "No";
+}
+
+function num(value: number): string {
+  return value ? value.toLocaleString("en-US") : "—";
+}
+
+function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[]) {
   const host = openHosts.find((item) => item.id === hostId) ?? null;
   cardEl.hidden = !lab && !model;
   if (!lab && !model) return;
   const title = document.querySelector("#card-name") as HTMLElement;
   const eyebrow = document.querySelector("#card-id") as HTMLElement;
+  const sub = document.querySelector("#card-sub") as HTMLElement;
   const body = document.querySelector("#card-body") as HTMLElement;
   body.replaceChildren();
   if (host && model && lab) {
     title.textContent = host.name;
-    eyebrow.textContent = "Provider";
-    addFact(body, "Serves", model.name);
-    addFact(body, "Lab", lab.name);
-    const where = locate(host.id, host.name);
-    addFact(body, "Place", where ? `${where.city} · approximate` : "No pin");
+    eyebrow.textContent = "PROVIDER";
+    sub.textContent = host.id;
+    addFact(body, "Models", String(host.models));
+    addFact(body, "Package", host.npm || "—");
+    addFact(body, "API", host.api || "—");
+    addFact(body, "Serving", model.name);
   } else if (model && lab) {
     title.textContent = model.name;
-    eyebrow.textContent = "Model";
+    eyebrow.textContent = "MODEL";
+    sub.textContent = model.id;
     addFact(body, "Lab", lab.name);
-    addFact(body, "Released", model.release || "Undated");
-    const caps = [
-      model.reasoning ? "reasoning" : "",
-      model.vision ? "vision" : "",
-      model.audio ? "audio" : "",
-      model.tools ? "tools" : "",
-      model.open ? "open weights" : "",
-    ].filter(Boolean);
-    addFact(body, "Capabilities", caps.join(" · ") || "—");
-    const pinned = openHosts.filter((item) => locate(item.id, item.name)).length;
-    addFact(body, "Providers", `${openHosts.length} serving · ${pinned} on the globe`);
-    const names = openHosts.slice(0, 6).map((item) => item.name);
-    if (names.length) addFact(body, "Including", names.join(", ") + (openHosts.length > 6 ? "…" : ""));
+    addFact(body, "Providers", String(openHosts.length));
+    addFact(body, "Context", num(model.context));
+    addFact(body, "Output", num(model.output));
+    addFact(body, "Input", model.input.join(" · ") || "—");
+    addFact(body, "Reasoning", yn(model.reasoning));
+    addFact(body, "Tool call", yn(model.tools));
+    addFact(body, "Structured", yn(model.structured));
+    addFact(body, "Temperature", yn(model.temperature));
+    addFact(body, "Weights", model.open ? "Open" : "Closed");
   } else if (lab) {
     title.textContent = lab.name;
-    eyebrow.textContent = "Lab";
-    const all = labModels(lab.id);
+    eyebrow.textContent = "LAB";
+    sub.textContent = lab.id;
+    addFact(body, "Models", String(lab.models));
+    addFact(body, "Description", lab.description || "—");
     const where = locate(lab.id, lab.name);
     addFact(body, "Place", where ? `${where.city} · approximate HQ` : "No pin");
-    addFact(body, "Models", `${all.length}${all.length > shown ? ` · showing ${shown} around the lab` : ""}`);
-    if (spawnedNames(lab)) addFact(body, "Around", spawnedNames(lab));
   }
-}
-
-function spawnedNames(lab: Lab): string {
-  return labModels(lab.id)
-    .slice(0, 4)
-    .map((model) => model.name)
-    .join(", ");
 }
 
 function addFact(root: HTMLElement, label: string, value: string) {

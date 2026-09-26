@@ -185,10 +185,12 @@ export class Globe {
       for (const ring of this.ripples.children) {
         const phase = (t + (ring.userData.phase as number)) % 1.6;
         const k = phase / 1.6;
-        ring.scale.setScalar(1 + k * 2.4);
+        const base = (ring.userData.base as number) || 0.03;
+        ring.scale.setScalar((base / 0.03) * (1 + k * 2.2));
         (ring as THREE.Mesh).material && (((ring as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - k));
       }
       this.controls?.update();
+      this.fitMarkers();
       this.renderer?.render(this.scene, this.camera);
     };
     loop();
@@ -197,9 +199,28 @@ export class Globe {
   show(geo: GeoPin[], sats: SatPin[], selected: string | null) {
     this.markers.clear();
     this.ripples.clear();
-    for (const pin of geo) this.add(pin.id, pin.kind, toVector(pin.lat, pin.lng, RADIUS + 0.03), pin.id === selected, pin.ripple);
+    for (const pin of geo.filter((item) => item.kind === "lab")) {
+      this.add(pin.id, pin.kind, toVector(pin.lat, pin.lng, RADIUS + 0.02), pin.id === selected, pin.ripple);
+    }
+    for (const pin of geo.filter((item) => item.kind === "host")) {
+      this.add(pin.id, pin.kind, toVector(pin.lat, pin.lng, RADIUS + 0.05), pin.id === selected, pin.ripple);
+    }
     for (const pin of sats) {
       this.add(pin.id, "model", around(pin.lat, pin.lng, pin.index, pin.count), pin.id === selected, pin.ripple);
+    }
+  }
+
+  private fitMarkers() {
+    const dist = this.camera.position.length();
+    const size = Math.min(0.042, Math.max(0.014, dist * 0.0055));
+    for (const child of this.markers.children) {
+      const on = child.userData.on === true;
+      const kind = child.userData.kind;
+      const scale = size * (on ? 1.2 : kind === "model" ? 0.72 : kind === "host" ? 0.82 : 1);
+      child.scale.set(scale, scale, 1);
+    }
+    for (const ring of this.ripples.children) {
+      ring.userData.base = size;
     }
   }
 
@@ -218,12 +239,14 @@ export class Globe {
   }
 
   private add(id: string, kind: Kind, position: THREE.Vector3, on: boolean, ripple: boolean) {
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex(kind, on), transparent: true, depthWrite: false }));
-    const size = on ? 0.11 : kind === "model" ? 0.07 : 0.085;
-    sprite.scale.set(size, size, 1);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: this.tex(kind, on), transparent: true, depthTest: false, depthWrite: false }),
+    );
     sprite.position.copy(position);
+    sprite.renderOrder = kind === "host" ? 3 : kind === "model" ? 2 : 1;
     sprite.userData.id = id;
     sprite.userData.kind = kind;
+    sprite.userData.on = on;
     this.markers.add(sprite);
     if (!ripple) return;
     const ring = new THREE.Mesh(

@@ -39,21 +39,24 @@ const LAB_NAMES: Record<string, string> = {
   nvidia: "Nvidia",
 };
 
-export type Lab = { id: string; name: string };
+export type Lab = { id: string; name: string; description: string; models: number };
 
 export type ModelRow = {
   id: string;
   name: string;
   lab: string;
   release: string;
+  context: number;
+  output: number;
+  input: string[];
   reasoning: boolean;
-  vision: boolean;
-  audio: boolean;
   tools: boolean;
+  structured: boolean;
+  temperature: boolean;
   open: boolean;
 };
 
-export type Host = { id: string; name: string; doc: string };
+export type Host = { id: string; name: string; npm: string; api: string; models: number };
 
 export type Serve = { model: string; host: string };
 
@@ -84,11 +87,15 @@ function flag(value: unknown): boolean {
   return value === true;
 }
 
-function modalities(value: unknown): string[] {
+function inputModes(value: unknown): string[] {
   if (!value || typeof value !== "object") return [];
-  const row = value as { input?: unknown; output?: unknown };
-  const all = [...(Array.isArray(row.input) ? row.input : []), ...(Array.isArray(row.output) ? row.output : [])];
-  return all.filter((item): item is string => typeof item === "string");
+  const input = (value as { input?: unknown }).input;
+  if (!Array.isArray(input)) return [];
+  return input.filter((item): item is string => typeof item === "string").slice(0, 6);
+}
+
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function day(value: unknown): string {
@@ -104,16 +111,19 @@ function asModel(value: unknown): ModelRow | null {
   const id = text(row.id, 160);
   const lab = id.split("/")[0] ?? "";
   if (!id || !LAB_NAMES[lab]) return null;
-  const modes = modalities(row.modalities);
+  const limit = row.limit && typeof row.limit === "object" ? (row.limit as Record<string, unknown>) : {};
   return {
     id,
     name: text(row.name, 140) || id,
     lab,
     release: day(row.release_date),
+    context: count(limit.context),
+    output: count(limit.output),
+    input: inputModes(row.modalities),
     reasoning: flag(row.reasoning),
-    vision: modes.includes("image"),
-    audio: modes.includes("audio"),
     tools: flag(row.tool_call),
+    structured: flag(row.structured_output),
+    temperature: flag(row.temperature),
     open: flag(row.open_weights),
   };
 }
@@ -153,26 +163,61 @@ function normalize(modelsJson: unknown, providersJson: unknown): Omit<CatalogBod
       for (const model of Object.values(bucket as Record<string, unknown>)) {
         if (serves.length >= MAX_SERVES) break;
         if (!model || typeof model !== "object") continue;
-        const modelId = canonicalId(hostId, model as RawModel, known);
+        const raw = model as RawModel;
+        const modelId = canonicalId(hostId, raw, known);
         if (!modelId) continue;
         serves.push({ model: modelId, host: hostId });
+        const knownModel = models.find((item) => item.id === modelId);
+        if (knownModel && flag(raw.structured_output)) knownModel.structured = true;
         used = true;
       }
       if (used && !seenHost.has(hostId)) {
         seenHost.add(hostId);
+        const listed = provider.models && typeof provider.models === "object" ? Object.keys(provider.models).length : 0;
         hosts.push({
           id: hostId,
           name: text(provider.name, 120) || hostId,
-          doc: httpsUrl(provider.doc),
+          npm: text(provider.npm, 120),
+          api: httpsUrl(provider.api),
+          models: listed,
         });
       }
     }
   }
   const labIds = new Set(models.map((model) => model.lab));
-  const labs = LAB_IDS.filter((id) => labIds.has(id)).map((id) => ({ id, name: LAB_NAMES[id] }));
+  const labs = LAB_IDS.filter((id) => labIds.has(id)).map((id) => ({
+    id,
+    name: LAB_NAMES[id],
+    description: "",
+    models: models.filter((model) => model.lab === id).length,
+  }));
   models.sort((a, b) => b.release.localeCompare(a.release) || a.name.localeCompare(b.name));
   hosts.sort((a, b) => a.name.localeCompare(b.name));
   return { labs, models, hosts, serves };
+}
+
+function descriptionFromToml(toml: string): string {
+  const block = toml.match(/description\s*=\s*"""([\s\S]*?)"""/);
+  const line = toml.match(/description\s*=\s*"([^"]*)"/);
+  const raw = (block?.[1] ?? line?.[1] ?? "").replace(/\s+/g, " ").trim();
+  return raw.slice(0, 400);
+}
+
+async function fillLabDescriptions(labs: Lab[], fetchImpl: typeof fetch) {
+  await Promise.all(
+    labs.map(async (lab) => {
+      try {
+        const res = await fetchImpl(
+          `https://raw.githubusercontent.com/anomalyco/models.dev/dev/labs/${lab.id}/lab.toml`,
+          { headers: { accept: "text/plain" } },
+        );
+        if (!res.ok) return;
+        lab.description = descriptionFromToml(await res.text());
+      } catch {
+        lab.description = "";
+      }
+    }),
+  );
 }
 
 export async function loadCatalog(fetchImpl: typeof fetch = fetch): Promise<CatalogBody> {
@@ -183,10 +228,12 @@ export async function loadCatalog(fetchImpl: typeof fetch = fetch): Promise<Cata
       fetchImpl(PROVIDERS_URL, { headers: { accept: "application/json" } }),
     ]);
     if (!modelsRes.ok || !providersRes.ok) throw new Error("upstream");
+    const graph = normalize(await modelsRes.json(), await providersRes.json());
+    await fillLabDescriptions(graph.labs, fetchImpl);
     const body: CatalogBody = {
       fetchedAt: new Date().toISOString(),
       cached: false,
-      ...normalize(await modelsRes.json(), await providersRes.json()),
+      ...graph,
     };
     fresh = { at: Date.now(), body };
     lastGood = body;
