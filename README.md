@@ -14,7 +14,7 @@ It's a small, fast way to answer questions like *"who actually serves this model
 - **See the models.** Select a lab to see its newest models ring around it. The card shows context size, input types, reasoning and tool support, and whether the weights are open.
 - **Follow the providers.** Select a model and arcs draw out to the providers that serve it: Amazon Bedrock, Azure, Vertex, OpenRouter, and many more.
 - **Catch what's new.** Labs that shipped something in the last 15 days pulse. The Latest panel lists the past week's releases.
-- **Make it yours.** Filter by category, search for a lab, and turn on the optional sound effects.
+- **Filter and search.** Show or hide labs, models, and providers, jump to a lab by name, and switch on sound effects if you like.
 
 It works on phones too, and it remembers the last catalog it loaded, so return visits open instantly (even offline).
 
@@ -60,21 +60,21 @@ Modex builds to a plain folder of static files, so you can host it almost anywhe
 npm run build
 ```
 
-Publish the `dist/` folder, and that's it. The build fetches models.dev once and bakes the catalog into `dist/catalog.json`, so there's no server to run and nothing to pay per visit. Rebuild now and then (a scheduled rebuild every 12 hours is included) to pick up new models.
+Publish the `dist/` folder, and that's it. The build fetches models.dev once and bakes the catalog into `dist/catalog.json`. Rebuild now and then (a scheduled rebuild every 12 hours is included) to pick up new models.
 
 Modex runs on **Cloudflare Pages**. [docs/DEPLOY.md](docs/DEPLOY.md) walks through that setup step by step, plus what to carry over to other hosts.
 
 ## Where the data comes from
 
 - **Labs, models, and providers** come from [models.dev](https://models.dev), an open, community-maintained catalog (© 2025 models.dev, MIT License). Modex just reads it and draws it.
-- **Locations** aren't part of models.dev. They're approximate headquarters, or a registered business address when no HQ is published, gathered by hand in [`src/places.ts`](src/places.ts).
+- **Locations** aren't part of models.dev. They're approximate headquarters, or a registered business address when no HQ is published, gathered in [`src/places.ts`](src/places.ts).
 - **Map outlines** come from Natural Earth, via world-atlas.
 
-Some labs and providers don't have a location yet, so they aren't pinned on the globe (their models still show up everywhere else). If you know where one is based, a pull request adding it to `src/places.ts` with a source link is very welcome. The same goes for fixes.
+Some labs and providers don't have a location yet, so they aren't pinned on the globe (their models still show up everywhere else).
 
 ## How it's built
 
-A small Vite + TypeScript app with three.js for the globe. No framework, no accounts, no tracking, no third-party scripts. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the details.
+A small Vite + TypeScript app with three.js for the globe. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the details.
 
 ## A note on accuracy
 
