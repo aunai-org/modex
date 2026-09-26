@@ -37,23 +37,34 @@ let notice = "";
 type Category = "lab" | "model" | "host" | "pulse";
 const show: Record<Category, boolean> = { lab: true, model: true, host: false, pulse: true };
 
-const globe = new Globe(document.querySelector("#globe") as HTMLElement, (id, kind) => {
-  if (kind === "lab") {
-    labId = id;
+const globe = new Globe(
+  document.querySelector("#globe") as HTMLElement,
+  (id, kind) => {
+    if (kind === "lab") {
+      labId = id;
+      modelId = null;
+      hostId = null;
+      const place = locate(id, "");
+      if (place) globe.focus(place.lat, place.lng);
+    } else if (kind === "model") {
+      modelId = id;
+      hostId = null;
+    } else {
+      hostId = id;
+      const place = locate(id, hosts.find((host) => host.id === id)?.name ?? "");
+      if (place) globe.focus(place.lat, place.lng);
+    }
+    render();
+  },
+  () => {
+    // Clicking empty globe drops the selection and closes the card.
+    if (!labId && !modelId && !hostId) return;
+    labId = null;
     modelId = null;
     hostId = null;
-    const place = locate(id, "");
-    if (place) globe.focus(place.lat, place.lng);
-  } else if (kind === "model") {
-    modelId = id;
-    hostId = null;
-  } else {
-    hostId = id;
-    const place = locate(id, hosts.find((host) => host.id === id)?.name ?? "");
-    if (place) globe.focus(place.lat, place.lng);
-  }
-  render();
-});
+    render();
+  },
+);
 
 function pickModel(model: ModelRow) {
   labId = model.lab;
@@ -146,7 +157,6 @@ function render() {
   if (show.host) for (const host of hostsServing(visible)) if (!pinned.has(host.id)) pinned.set(host.id, host);
   const relatedHostIds = new Set(relatedHosts.map((host) => host.id));
   const arcs: Arc[] = [];
-  const labPlace = openModel ? locate(openModel.lab, "") : null;
   for (const host of pinned.values()) {
     const where = locate(host.id, host.name);
     if (!where) continue;
@@ -161,8 +171,8 @@ function render() {
       lng: where.lng,
       ripple: show.pulse && tone === "focus",
     });
-    if (labPlace && relatedHostIds.has(host.id)) {
-      arcs.push({ fromLat: labPlace.lat, fromLng: labPlace.lng, toLat: where.lat, toLng: where.lng });
+    if (openModel && relatedHostIds.has(host.id)) {
+      arcs.push({ from: { kind: "lab", id: openModel.lab }, to: { kind: "host", id: host.id } });
     }
   }
 
@@ -181,7 +191,7 @@ function render() {
       tone,
       lat: labHome!.lat,
       lng: labHome!.lng,
-      fan: { index, count: spawned.length },
+      fan: { index, count: spawned.length, lab: model.lab },
       ripple: show.pulse && tone === "focus",
     });
   });
@@ -206,6 +216,13 @@ function fitPanels() {
     (latestEl.closest("details") as HTMLDetailsElement).open = false;
   }
   lastCard = card;
+  capCard();
+}
+
+/** The card and the filters share the left edge; the card stops above the filters. */
+function capCard() {
+  const room = filtersEl.getBoundingClientRect().top - cardEl.getBoundingClientRect().top - 10;
+  cardEl.style.maxHeight = `${Math.max(room, 120)}px`;
 }
 
 function setText(selector: string, value: string) {
@@ -306,7 +323,10 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], o
     when.textContent = model.release ? (recent(model) ? `${model.release} · ${ago(model.release)}` : model.release) : "Release date unknown";
     sub.textContent = `inspect model ${model.id}`;
     addFact(body, "Lab", lab.name);
-    addFact(body, "Providers", String(openHosts.length));
+    const mapped = openHosts.filter((item) => locate(item.id, item.name));
+    const summary = `${openHosts.length} · ${mapped.length} on map`;
+    if (mapped.length) addFact(body, "Providers", summary, () => frameProviders(lab, mapped));
+    else addFact(body, "Providers", summary);
     addFact(body, "Context", num(model.context));
     addFact(body, "Output", num(model.output));
     addFact(body, "Input", model.input.join(" · ") || "—");
@@ -327,16 +347,23 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], o
   }
 }
 
-function addFact(root: HTMLElement, label: string, value: string, href?: string) {
+function addFact(root: HTMLElement, label: string, value: string, target?: string | (() => void)) {
   const row = document.createElement("div");
   const dt = document.createElement("dt");
   dt.textContent = label;
   const dd = document.createElement("dd");
   if (value === "Yes" || value === "Open") dd.className = "yes";
   else if (value === "No") dd.className = "no";
-  if (href) {
+  if (typeof target === "function") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "fact-link";
+    button.textContent = `${value} ↗`;
+    button.addEventListener("click", target);
+    dd.append(button);
+  } else if (target) {
     const link = document.createElement("a");
-    link.href = href;
+    link.href = target;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = value;
@@ -346,6 +373,14 @@ function addFact(root: HTMLElement, label: string, value: string, href?: string)
   }
   row.append(dt, dd);
   root.append(row);
+}
+
+/** Turn and zoom the globe so a lab and its mapped providers are all in view. */
+function frameProviders(lab: Lab, mapped: Host[]) {
+  const spots = [locate(lab.id, lab.name), ...mapped.map((host) => locate(host.id, host.name))].filter(
+    (spot): spot is NonNullable<typeof spot> => spot !== null,
+  );
+  globe.frame(spots);
 }
 
 async function load() {
@@ -416,5 +451,8 @@ document.querySelector("#card-close")?.addEventListener("click", () => {
   else labId = null;
   render();
 });
+
+filtersEl.addEventListener("toggle", capCard);
+window.addEventListener("resize", capCard);
 
 void load();

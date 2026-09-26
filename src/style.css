@@ -161,10 +161,12 @@ button { cursor: pointer; }
   width: min(340px, calc(100vw - 32px));
   max-height: calc(100vh - 300px);
   overflow: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
   padding: 10px 12px 12px;
 }
-.card::-webkit-scrollbar { width: 0; height: 0; }
+.card::-webkit-scrollbar { width: 4px; }
+.card::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 2px; }
 .close {
   position: absolute;
   right: 6px;
@@ -194,6 +196,18 @@ button { cursor: pointer; }
 .facts dd.yes { color: var(--link); }
 .facts dd.no { color: var(--faint); }
 .facts a { color: var(--link); }
+.fact-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-size: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(143, 227, 168, 0.4);
+  text-underline-offset: 3px;
+}
+.fact-link:hover { text-decoration-color: var(--link); }
 
 .hint {
   position: fixed;

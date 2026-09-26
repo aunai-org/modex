@@ -32,12 +32,13 @@ export type Pin = {
   lat: number;
   lng: number;
   /** Models fan out around their lab instead of sitting on the map. */
-  fan?: { index: number; count: number };
+  fan?: { index: number; count: number; lab: string };
   /** The selected place: never clustered, and nearby pins ring around it. */
   anchor?: boolean;
 };
 
-export type Arc = { fromLat: number; fromLng: number; toLat: number; toLng: number };
+/** A link between two pins; it follows them wherever layout() draws them. */
+export type Arc = { from: { kind: Kind; id: string }; to: { kind: Kind; id: string } };
 
 
 /** On-screen marker size in CSS pixels, whatever the zoom. */
@@ -193,21 +194,35 @@ function around(center: THREE.Vector3, index: number, count: number, radius: num
     .addScaledVector(north, Math.sin(ang) * radius);
 }
 
-function arcLine(arc: Arc): THREE.Line {
-  const a = toVector(arc.fromLat, arc.fromLng, 1);
-  const b = toVector(arc.toLat, arc.toLng, 1);
-  const angle = a.angleTo(b);
-  const lift = 0.04 + angle * 0.22;
-  const points: THREE.Vector3[] = [];
-  for (let i = 0; i <= 48; i++) {
-    const t = i / 48;
-    const p = a.clone().lerp(b, t).normalize();
-    points.push(p.multiplyScalar(RADIUS + 0.02 + Math.sin(Math.PI * t) * lift));
+const ARC_STEPS = 48;
+
+/** Redraw an arc between two marker positions: a raised great circle, or a short tether when they're close. */
+function bend(line: THREE.Line, a: THREE.Vector3, b: THREE.Vector3) {
+  const attr = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const ua = a.clone().normalize();
+  const ub = b.clone().normalize();
+  const lift = ua.angleTo(ub) * 0.22;
+  const ra = a.length();
+  const rb = b.length();
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= ARC_STEPS; i++) {
+    const t = i / ARC_STEPS;
+    p.copy(ua).lerp(ub, t).normalize().multiplyScalar(ra + (rb - ra) * t + Math.sin(Math.PI * t) * lift);
+    attr.setXYZ(i, p.x, p.y, p.z);
   }
-  return new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(points),
-    new THREE.LineBasicMaterial({ color: 0x9ecbff, transparent: true, opacity: 0.55 }),
+  attr.needsUpdate = true;
+  line.geometry.computeBoundingSphere();
+}
+
+function arcLine(arc: Arc): THREE.Line {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array((ARC_STEPS + 1) * 3), 3));
+  const line = new THREE.Line(
+    geometry,
+    new THREE.LineBasicMaterial({ color: 0x9ecbff, transparent: true, opacity: 0.7 }),
   );
+  line.userData = { from: `${arc.from.kind}:${arc.from.id}`, to: `${arc.to.kind}:${arc.to.id}` };
+  return line;
 }
 
 type Marker = THREE.Sprite & {
@@ -217,7 +232,7 @@ type Marker = THREE.Sprite & {
     label: string;
     tone: Tone;
     home: THREE.Vector3;
-    fan: { index: number; count: number } | null;
+    fan: { index: number; count: number; lab: string } | null;
     anchor: boolean;
     ring: THREE.Mesh | null;
   };
@@ -244,18 +259,22 @@ export class Globe {
   private pointer = new THREE.Vector2();
   private down: [number, number] | null = null;
   private onPick: (id: string, kind: Kind) => void;
+  private onEmpty: () => void;
   private icons = new Map<string, THREE.CanvasTexture>();
   private ringGeometry = new THREE.RingGeometry(RING_OUTER * 0.8, RING_OUTER, 40);
   private scratch = new THREE.Vector3();
   private flight: { from: THREE.Quaternion; to: THREE.Quaternion; dir: THREE.Vector3; start: number; d0: number; d1: number } | null =
     null;
   /** A cluster that could not split by zooming, fanned out in place. */
-  private spider: { center: THREE.Vector3; ids: string[]; dist: number } | null = null;
+  private spider: { center: THREE.Vector3; ids: string[]; dist: number; hub?: string } | null = null;
+  /** The ring around the current selection, as of the last frame. */
+  private lastRing: { center: THREE.Vector3; ids: string[]; hub: string } | null = null;
   private tip: HTMLElement;
   private hover: [number, number] | null = null;
 
-  constructor(private root: HTMLElement, onPick: (id: string, kind: Kind) => void) {
+  constructor(private root: HTMLElement, onPick: (id: string, kind: Kind) => void, onEmpty: () => void = () => {}) {
     this.onPick = onPick;
+    this.onEmpty = onEmpty;
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
     this.camera.position.set(1.2, 0.8, 6.6);
     this.tip = document.createElement("div");
@@ -321,7 +340,16 @@ export class Globe {
 
   show(pins: Pin[], arcs: Arc[]) {
     this.clear();
-    this.spider = null;
+    const present = new Set(pins.map((pin) => `${pin.kind}:${pin.id}`));
+    if (this.spider) {
+      // Keep an open fan-out while its pins are still on the map.
+      const ids = this.spider.ids.filter((id) => present.has(id));
+      this.spider = ids.length > 1 ? { ...this.spider, ids } : null;
+    } else if (this.lastRing && !pins.some((pin) => pin.anchor)) {
+      // The selection was cleared: keep its neighbours fanned out rather than merging them back.
+      const ids = this.lastRing.ids.filter((id) => present.has(id));
+      if (ids.length > 1) this.spider = { ...this.lastRing, ids, dist: this.camera.position.length() };
+    }
     for (const pin of pins) {
       // A fanned model's home is its lab; layout() rings it around that point.
       this.add(pin, toVector(pin.lat, pin.lng, RADIUS + (pin.kind === "host" ? 0.05 : 0.02)));
@@ -342,6 +370,22 @@ export class Globe {
       d0,
       d1: distance ?? d0,
     };
+  }
+
+  /** Turn and zoom so every given place is in view. */
+  frame(spots: { lat: number; lng: number }[]) {
+    if (!spots.length) return;
+    const dirs = spots.map((spot) => toVector(spot.lat, spot.lng, 1));
+    const center = dirs.reduce((sum, dir) => sum.add(dir), new THREE.Vector3());
+    if (center.lengthSq() < 1e-6) center.copy(dirs[0]);
+    center.normalize();
+    const spread = Math.max(...dirs.map((dir) => dir.angleTo(center)));
+    const min = this.controls?.minDistance ?? 3.1;
+    const max = this.controls?.maxDistance ?? 9;
+    const distance = Math.min(max, Math.max(min, RADIUS + 2.2 + spread * 5.5));
+    const { lat, lng } = toLatLng(center);
+    this.spider = null;
+    this.focus(lat, lng, distance);
   }
 
   private fly(now: number) {
@@ -376,15 +420,19 @@ export class Globe {
     if (this.spider && cam.length() > this.spider.dist + 0.35) this.spider = null;
     const spun = new Map<string, THREE.Vector3>();
     if (this.spider) {
-      const { center, ids } = this.spider;
-      const r = worldSize(center, ringPx(ids.length));
-      ids.forEach((id, i) => spun.set(id, around(center, i, ids.length, r, 0.05)));
+      const { center, ids, hub } = this.spider;
+      const rim = ids.filter((id) => id !== hub);
+      const r = worldSize(center, ringPx(rim.length));
+      if (hub) spun.set(hub, center.clone().setLength(RADIUS + 0.02));
+      rim.forEach((id, i) => spun.set(id, around(center, i, rim.length, r, 0.05)));
     }
 
     const markers = this.markers.children as Marker[];
     // The selection's neighbours ring around it, so nothing hides under the selected pin.
+    // Remember that ring: if the selection is cleared, it stays open instead of re-clustering.
+    this.lastRing = null;
     const anchor = markers.find((m) => m.userData.anchor && facing(m.userData.home));
-    if (anchor) {
+    if (anchor && !spun.has(key(anchor))) {
       const at = screen(anchor.userData.home);
       const near = markers.filter((m) => {
         const d = m.userData;
@@ -394,16 +442,24 @@ export class Globe {
       });
       const r = worldSize(anchor.userData.home, ringPx(near.length));
       near.forEach((m, i) => spun.set(key(m), around(anchor.userData.home, i, near.length, r, 0.05)));
+      if (near.length) {
+        this.lastRing = { center: anchor.userData.home.clone(), hub: key(anchor), ids: [key(anchor), ...near.map(key)] };
+      }
     }
 
     const loose: { m: Marker; x: number; y: number }[] = [];
-    for (const m of markers) {
+    // Place map pins first, so a fanned model can ring its lab where the lab is drawn.
+    const drawn = new Map<string, THREE.Vector3>();
+    const ordered = [...markers.filter((m) => !m.userData.fan), ...markers.filter((m) => m.userData.fan)];
+    for (const m of ordered) {
       const d = m.userData;
       if (d.fan) {
-        const r = worldSize(d.home, FAN_PX + d.fan.count * 2);
-        m.position.copy(around(d.home, d.fan.index, d.fan.count, r));
+        const center = drawn.get(`lab:${d.fan.lab}`) ?? d.home;
+        const r = worldSize(center, FAN_PX + d.fan.count * 2);
+        m.position.copy(around(center, d.fan.index, d.fan.count, r));
       } else {
         m.position.copy(spun.get(key(m)) ?? d.home);
+        drawn.set(key(m), m.position);
       }
       m.visible = facing(d.fan ? d.home : m.position);
       if (m.visible && !d.fan && !d.anchor && d.tone !== "focus" && !spun.has(key(m))) {
@@ -481,6 +537,17 @@ export class Globe {
         d.ring.position.copy(m.position);
         d.ring.lookAt(m.position.clone().multiplyScalar(2));
         this.pulse(d.ring, size, t, d.ring.userData.phase as number);
+      }
+    }
+
+    if (this.arcs.children.length) {
+      const byKey = new Map(markers.map((m) => [key(m), m]));
+      for (const line of this.arcs.children as THREE.Line[]) {
+        const from = byKey.get(line.userData.from as string);
+        const to = byKey.get(line.userData.to as string);
+        line.visible = !!from && !!to;
+        // A clustered end is hidden; draw to where it really is, which sits under its badge.
+        if (from && to) bend(line, from.position, to.visible ? to.position : to.userData.home);
       }
     }
   }
@@ -609,7 +676,11 @@ export class Globe {
     if (!this.renderer || !this.down) return;
     if (Math.hypot(event.clientX - this.down[0], event.clientY - this.down[1]) > 8) return;
     const hit = this.hitAt(event.clientX, event.clientY);
-    if (!hit) return;
+    if (!hit) {
+      // A click on the globe or space (not a drag) clears the selection.
+      this.onEmpty();
+      return;
+    }
     if (this.badges.children.includes(hit)) {
       const { center, ids } = (hit as Badge).userData;
       this.openCluster(center, ids);
