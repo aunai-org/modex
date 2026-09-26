@@ -228,13 +228,13 @@ function bend(line: THREE.Line, a: THREE.Vector3, b: THREE.Vector3) {
   line.geometry.computeBoundingSphere();
 }
 
+/** Every arc looks the same, so they share one material; only their geometry is per arc. */
+const ARC_MATERIAL = new THREE.LineBasicMaterial({ color: 0x9ecbff, transparent: true, opacity: 0.7 });
+
 function arcLine(arc: Arc): THREE.Line {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array((ARC_STEPS + 1) * 3), 3));
-  const line = new THREE.Line(
-    geometry,
-    new THREE.LineBasicMaterial({ color: 0x9ecbff, transparent: true, opacity: 0.7 }),
-  );
+  const line = new THREE.Line(geometry, ARC_MATERIAL);
   line.userData = { from: `${arc.from.kind}:${arc.from.id}`, to: `${arc.to.kind}:${arc.to.id}` };
   return line;
 }
@@ -279,6 +279,9 @@ export class Globe {
   onArcLand?: (order: number) => void;
   onClusterOpen?: () => void;
   private icons = new Map<string, THREE.CanvasTexture>();
+  private markerMaterials = new Map<string, THREE.SpriteMaterial>();
+  private ringPool: THREE.Mesh[] = [];
+  private ringsUsed = 0;
   private ringGeometry = new THREE.RingGeometry(RING_OUTER * 0.8, RING_OUTER, 40);
   private scratch = new THREE.Vector3();
   private flight: { from: THREE.Quaternion; to: THREE.Quaternion; dir: THREE.Vector3; start: number; d0: number; d1: number } | null =
@@ -706,19 +709,17 @@ export class Globe {
     return this.ray.intersectObjects(targets, false)[0]?.object ?? null;
   }
 
+  /**
+   * Drop this frame's markers and arcs, but keep materials, pulse rings and badges for reuse.
+   * Disposing every material on each selection left each shader program briefly unused, so three.js
+   * deleted and recompiled it on every click (a stall, and dead programs piling up until GC).
+   */
   private clear() {
-    for (const child of [...this.markers.children, ...this.ripples.children, ...this.badges.children]) {
-      const material = (child as THREE.Sprite | THREE.Mesh).material;
-      if (material && !Array.isArray(material)) material.dispose();
-    }
-    for (const line of this.arcs.children as THREE.Line[]) {
-      line.geometry.dispose();
-      (line.material as THREE.Material).dispose();
-    }
-    this.markers.clear();
-    this.ripples.clear();
-    this.badges.clear();
+    for (const line of this.arcs.children as THREE.Line[]) line.geometry.dispose();
     this.arcs.clear();
+    this.markers.clear();
+    for (const ring of this.ringPool) ring.visible = false;
+    this.ringsUsed = 0;
   }
 
   private tex(kind: Kind, tone: Tone): THREE.CanvasTexture {
@@ -739,7 +740,7 @@ export class Globe {
     return made;
   }
 
-  private ring(color: number): THREE.Mesh {
+  private makeRing(color: number): THREE.Mesh {
     const ring = new THREE.Mesh(
       this.ringGeometry,
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }),
@@ -749,24 +750,42 @@ export class Globe {
     return ring;
   }
 
+  /** A pulse ring for a marker, reused across selections (each keeps its own material for its own fade). */
+  private ring(color: number): THREE.Mesh {
+    const ring = this.ringPool[this.ringsUsed] ?? this.ringPool[this.ringPool.push(this.makeRing(color)) - 1];
+    this.ringsUsed++;
+    (ring.material as THREE.MeshBasicMaterial).color.setHex(color);
+    ring.userData.phase = Math.random();
+    return ring;
+  }
+
+  /** One shared material per icon style; position and size live on each sprite, not the material. */
+  private markerMaterial(kind: Kind, tone: Tone): THREE.SpriteMaterial {
+    const key = `${kind}:${tone}`;
+    let material = this.markerMaterials.get(key);
+    if (!material) {
+      material = new THREE.SpriteMaterial({
+        map: this.tex(kind, tone),
+        transparent: true,
+        opacity: tone === "dim" ? 0.6 : 1,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this.markerMaterials.set(key, material);
+    }
+    return material;
+  }
+
   private newBadge(): Badge {
     const b = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false })) as Badge;
     b.renderOrder = 2;
-    b.userData = { center: new THREE.Vector3(), ids: [], label: "", ring: this.ring(0xf4f4f4), tone: "related", count: 0 };
+    b.userData = { center: new THREE.Vector3(), ids: [], label: "", ring: this.makeRing(0xf4f4f4), tone: "related", count: 0 };
     this.badges.add(b);
     return b;
   }
 
   private add(pin: Pin, home: THREE.Vector3) {
-    const sprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: this.tex(pin.kind, pin.tone),
-        transparent: true,
-        opacity: pin.tone === "dim" ? 0.6 : 1,
-        depthTest: false,
-        depthWrite: false,
-      }),
-    ) as Marker;
+    const sprite = new THREE.Sprite(this.markerMaterial(pin.kind, pin.tone)) as Marker;
     sprite.position.copy(home);
     sprite.renderOrder = pin.tone === "focus" ? 5 : pin.kind === "host" ? 4 : pin.kind === "model" ? 3 : 1;
     sprite.userData = {
