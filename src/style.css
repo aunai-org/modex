@@ -41,7 +41,10 @@ button { cursor: pointer; }
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
-.brand { margin: 0; display: flex; align-items: center; gap: 8px; font-weight: 500; letter-spacing: 0.22em; font-size: 12px; }
+.brand { display: grid; gap: 3px; }
+.wordmark { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; letter-spacing: 0.26em; }
+.wordmark .dot { width: 9px; height: 9px; }
+.tagline { margin: 0 0 0 19px; color: var(--muted); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; white-space: nowrap; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12); }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .clock { color: var(--muted); font-size: 11px; }
@@ -161,7 +164,7 @@ button { cursor: pointer; }
 
 /* Detail card: terminal readout */
 .card {
-  top: 44px;
+  top: 68px;
   left: 16px;
   width: min(340px, calc(100vw - 32px));
   max-height: calc(100vh - 300px);
@@ -214,18 +217,51 @@ button { cursor: pointer; }
 }
 .fact-link:hover { text-decoration-color: var(--link); }
 
+/* Bottom line: always-on legend, how to use, and the data credit. */
 .hint {
   position: fixed;
   z-index: 1;
   left: 50%;
   bottom: 10px;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin: 0;
   color: var(--faint);
   font-size: 10px;
   white-space: nowrap;
   pointer-events: none;
 }
+.hint .key { display: flex; gap: 10px; color: var(--muted); }
+.hint .key span { display: inline-flex; align-items: center; gap: 5px; }
+.hint .key .mark { width: 10px; height: 10px; }
+.hint .key .host { color: var(--host); }
+.hint .credit a { pointer-events: auto; color: var(--muted); text-underline-offset: 3px; }
+.hint .credit a:hover { color: var(--ink); }
+
+/* About: what Modex is, where the data comes from, and what it does not claim. */
+.about {
+  position: fixed;
+  z-index: 4;
+  top: 58px;
+  right: 16px;
+  width: min(330px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  padding: 10px 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+.about h2 { margin: 3px 22px 6px 0; color: var(--title); font-size: 13px; font-weight: 600; }
+.about p { margin: 0 0 8px; color: var(--ink); font-size: 11px; line-height: 1.55; }
+.about .facts { margin-bottom: 8px; }
+.about .facts div { grid-template-columns: 58px 1fr; }
+.about .disclaimer { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 
 @media (max-width: 1000px) {
   .latest { width: 210px; }
@@ -309,3 +345,19 @@ button { cursor: pointer; }
 #sound[aria-pressed="true"] .wave { display: inline; }
 #sound[aria-pressed="true"] .mute { display: none; }
 #sound[aria-pressed="true"] { color: var(--accent); border-color: rgba(245, 160, 74, 0.5); }
+
+/* The legend matters most on first use; keep it when space is short, drop the how-to text first. */
+@media (max-height: 640px) {
+  .hint { display: flex; }
+  .hint .how { display: none; }
+}
+@media (max-width: 760px) {
+  .hint .how { display: none; }
+}
+/* Phones: the bottom belongs to the panels and the sheet, so the legend sits under the logo. */
+@media (max-width: 600px) {
+  .hint { top: 58px; bottom: auto; left: 16px; transform: none; gap: 12px; }
+  .clock { display: none; }
+  #app[data-card="open"] .hint { display: flex; }
+  .about { top: auto; bottom: 0; right: 0; left: 0; width: 100%; max-height: 60vh; border-radius: 12px 12px 0 0; }
+}

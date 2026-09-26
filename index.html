@@ -14,9 +14,15 @@
       <div id="globe" aria-label="Globe of model labs"></div>
 
       <header class="topbar">
-        <p class="brand"><i class="dot" aria-hidden="true"></i>MODEX</p>
+        <div class="brand">
+          <p class="wordmark"><i class="dot" aria-hidden="true"></i>MODEX</p>
+          <p class="tagline">Labs · Models · Providers</p>
+        </div>
         <div class="topbar-right">
           <span id="clock" class="clock"></span>
+          <button id="about-btn" class="icon-btn" type="button" aria-expanded="false" aria-controls="about" aria-label="About Modex" title="About Modex">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>
+          </button>
           <button id="sound" class="icon-btn" type="button" aria-pressed="false" aria-label="Sound off" title="Sound off">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path class="wave" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path class="mute" d="M11 6l3.5 4M14.5 6L11 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
           </button>
@@ -69,7 +75,28 @@
         <ol id="latest"></ol>
       </details>
 
-      <p class="hint">Drag to rotate · Scroll to zoom · Select a lab</p>
+      <section class="about" id="about" hidden aria-labelledby="about-title">
+        <button id="about-close" class="close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">ABOUT</p>
+        <h2 id="about-title">Modex</h2>
+        <p>A globe of the AI model catalog: the labs that make models, the models they release, and the providers that serve them.</p>
+        <dl class="facts">
+          <div><dt>Data</dt><dd><a href="https://models.dev" target="_blank" rel="noopener noreferrer">models.dev</a>, an open catalog of models and providers (<a href="https://github.com/anomalyco/models.dev" target="_blank" rel="noopener noreferrer">source</a>). Refreshed hourly.</dd></div>
+          <div><dt>Map</dt><dd>Natural Earth country outlines, via world-atlas.</dd></div>
+          <div><dt>License</dt><dd>App code is MIT. Catalog data stays under the models.dev license.</dd></div>
+        </dl>
+        <p class="disclaimer">Places on the globe are approximate headquarters, or a registered business address where none is published. Modex compiles them; they are not part of models.dev. Modex is independent and not affiliated with models.dev or any lab or provider shown. Details can be incomplete or out of date, so check with the provider before relying on them.</p>
+      </section>
+
+      <footer class="hint">
+        <span class="key" aria-label="Legend">
+          <span><svg class="mark" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 .8 10.5 3.4v5.2L6 11.2 1.5 8.6V3.4Z" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="4.3" r="1.1" fill="currentColor"/><circle cx="4.2" cy="7.4" r="1.1" fill="currentColor"/><circle cx="7.8" cy="7.4" r="1.1" fill="currentColor"/></svg>Lab</span>
+          <span><svg class="mark" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 10.8 6 6 10.8 1.2 6Z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>Model</span>
+          <span class="host"><svg class="mark" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/></svg>Provider</span>
+        </span>
+        <span class="how">Drag to rotate · Scroll to zoom</span>
+        <span class="credit">Data <a href="https://models.dev" target="_blank" rel="noopener noreferrer">models.dev</a></span>
+      </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

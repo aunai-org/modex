@@ -11,7 +11,7 @@ browser  -- GET /api/catalog -->  Pages Function
                                       cache 1 hour (isolate + edge)
 ```
 
-`shared/catalog.ts` is the only upstream client. It fetches two fixed URLs, keeps a short graph, and drops everything else. A model is placed with its lab, never at its own coordinates. A host is placed only when `src/places.ts` has an approximate headquarters. Vite’s dev server uses the same function as the Pages Function.
+`shared/catalog.ts` is the only upstream client. It fetches two fixed URLs, keeps a short graph, and drops everything else. Labs are not a hand-kept list: every model id starts with its lab (`amazon/nova-pro`), so the lab set follows the catalog. A few display names are kept in `LAB_NAMES`; others are title-cased from the id. Providers name models their own way (`gpt-5.4`, `qwen/qwen3.5-plus`, `eu.anthropic.claude-opus-4-6-v1`, `claude-sonnet-4-5@20250929`), so each provider id is reduced to a bare model name, with a lab hint when the provider names one, and linked only when exactly one catalog model has that name. Ambiguous names stay unlinked. A lab without a place in `src/places.ts` keeps its models in the data and lists; it just has no pin. A model is placed with its lab, never at its own coordinates. A host is placed only when `src/places.ts` has an approximate headquarters. Vite’s dev server uses the same function as the Pages Function.
 
 The globe draws labs first. Choosing a lab fans that lab’s models out around the marker, the same way Orbitals fans missions around a pad. Choosing a model draws the hosts that serve it. Those host pins are geographic. Model pins are not.
 

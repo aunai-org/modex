@@ -285,7 +285,7 @@ function paintCounts(shownLabs: Lab[], pinnedHosts: Host[]) {
   clockEl.textContent = time ? `Updated ${time}` : "";
   if (!globe.ready) statusEl.textContent = "WebGL is unavailable.";
   else if (notice) statusEl.textContent = notice;
-  else statusEl.textContent = `${models.length} models · ${hosts.length} providers loaded`;
+  else statusEl.textContent = `${labs.length} labs · ${models.length} models · ${hosts.length} providers`;
 }
 
 /** Latest lists recent releases: 7 days by default, 15 when the 15-day window is on. */
@@ -401,7 +401,6 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], o
     } else {
       addFact(body, "Providers", summary);
     }
-    addFact(body, "About", lab.description || "—");
   }
 }
 
@@ -557,6 +556,28 @@ refreshEl.addEventListener("click", () => {
 document.querySelectorAll(".panel summary").forEach((summary) => summary.addEventListener("click", cueTick));
 globe.onArcLand = cueLand;
 globe.onClusterOpen = cueCluster;
+
+const aboutEl = document.querySelector("#about") as HTMLElement;
+const aboutBtn = document.querySelector("#about-btn") as HTMLButtonElement;
+function showAbout(open: boolean) {
+  if (aboutEl.hidden === !open) return;
+  aboutEl.hidden = !open;
+  aboutBtn.setAttribute("aria-expanded", String(open));
+  cueTick();
+}
+aboutBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  showAbout(aboutEl.hidden);
+});
+document.querySelector("#about-close")?.addEventListener("click", () => showAbout(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") showAbout(false);
+});
+// A click anywhere outside the panel closes it, the globe included.
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target as Node;
+  if (!aboutEl.hidden && !aboutEl.contains(target) && !aboutBtn.contains(target)) showAbout(false);
+});
 
 const soundEl = document.querySelector("#sound") as HTMLButtonElement;
 function paintSound() {
