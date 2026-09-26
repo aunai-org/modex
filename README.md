@@ -13,23 +13,40 @@ Open the local URL Vite prints. The dev server serves `/catalog.json` live from 
 
 ## Deploy
 
-Cloudflare Pages, as a fully static site:
+Cloudflare Pages, connected to this repository:
 
-- Build command: `npm run build`
-- Output directory: `dist`
-- Environment variable: `NODE_VERSION` = `22`
+| Setting | Value |
+| --- | --- |
+| Framework preset | None |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Environment variable | `NODE_VERSION` = `22` |
 
-`npm run build` fetches models.dev once and writes `dist/catalog.json` next to the page. If models.dev is unavailable the build fails on purpose, so Cloudflare keeps serving the last good deploy. Nothing runs per request: no Pages Function, so no CPU limit and no request quota.
+### Catalog mode
 
-To keep the catalog current, `.github/workflows/rebuild.yml` triggers a rebuild every 12 hours through a Cloudflare deploy hook:
+The catalog can be served two ways. Pick one with the `CATALOG_MODE` environment variable; no code change is needed.
 
-1. Cloudflare → Workers & Pages → modex → Settings → Builds → Deploy hooks → create one for the branch you deploy.
+| `CATALOG_MODE` | How it works | Cost |
+| --- | --- | --- |
+| `static` (default, or unset) | `npm run build` fetches models.dev once and writes `dist/catalog.json`. A rebuild every 12 hours keeps it current. | Static files only: free and unlimited, no CPU limit. |
+| `function` | The page calls `/api/catalog`, a Pages Function in `functions/` that caches the catalog for an hour with the Cache API. | Each request is a Function call (100,000 a day on the free plan), and a cache miss needs about 60 ms of CPU, more than the free plan's 10 ms. Use it on Workers Paid. |
+
+To change it: Cloudflare → Workers & Pages → modex → **Settings → Variables and Secrets** → add `CATALOG_MODE` (Text) for Production (and Preview if you like) → save → **Deployments → Retry deployment** on the latest build. Remove the variable, or set it to `static`, to switch back.
+
+In static mode a failed fetch fails the build on purpose, so Cloudflare keeps serving the last good deploy. The Function in `functions/` is still deployed but nothing calls it.
+
+Locally: `npm run build` for static, `CATALOG_MODE=function npm run build` for function mode. `npm run dev` serves both URLs.
+
+### Rebuild every 12 hours (static mode)
+
+`.github/workflows/rebuild.yml` calls a Cloudflare deploy hook at 00:00 and 12:00 UTC:
+
+1. Cloudflare → Workers & Pages → modex → Settings → Builds → **Deploy hooks** → add one for the production branch.
 2. GitHub → Settings → Secrets and variables → Actions → add `CLOUDFLARE_DEPLOY_HOOK` with the hook URL.
-3. The workflow must be on the repository's default branch for GitHub to run it on schedule. It can also be run by hand from the Actions tab.
 
-The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and checks for a newer file every 30 minutes.
+GitHub runs scheduled workflows only from the default branch (`main`). The workflow can also be run by hand from the Actions tab.
 
-The `preview` branch keeps the earlier design, a Pages Function with the Cache API, for when per-request freshness is worth the Function cost.
+The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and checks for a newer one every 30 minutes.
 
 ## Data
 

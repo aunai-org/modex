@@ -1,6 +1,6 @@
 const MODELS_URL = "https://models.dev/models.json";
 const PROVIDERS_URL = "https://models.dev/api.json";
-/** Only the dev server reuses a loaded catalog; a production build fetches once per build. */
+/** How long one loaded catalog is reused: by the Pages Function (function mode) and the dev server. */
 const TTL_MS = 60 * 60 * 1000;
 const MAX_MODELS = 1000;
 const MAX_SERVES = 12000;

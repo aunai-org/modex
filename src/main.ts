@@ -483,7 +483,7 @@ async function load(options: { quiet?: boolean; force?: boolean } = {}) {
     refreshEl.disabled = true;
   }
   try {
-    const res = await fetch("/catalog.json", options.force ? { cache: "no-cache" } : undefined);
+    const res = await fetch(__CATALOG_URL__, options.force ? { cache: "no-cache" } : undefined);
     if (!res.ok) throw new Error(String(res.status));
     const body = (await res.json()) as CatalogBody;
     const changed = body.fetchedAt !== fetchedAt;
