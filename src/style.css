@@ -303,3 +303,9 @@ button { cursor: pointer; }
   }
   #app[data-card="open"] :is(.panel, .hint) { display: none; }
 }
+
+/* Sound toggle: waves when on, a cross when off. */
+#sound .wave { display: none; }
+#sound[aria-pressed="true"] .wave { display: inline; }
+#sound[aria-pressed="true"] .mute { display: none; }
+#sound[aria-pressed="true"] { color: var(--accent); border-color: rgba(245, 160, 74, 0.5); }

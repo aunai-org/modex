@@ -4,6 +4,7 @@ import { feature } from "topojson-client";
 import { geoEquirectangular, geoPath } from "d3-geo";
 import type { FeatureCollection, Geometry } from "geojson";
 import world from "world-atlas/countries-110m.json";
+import { Space, rimGlow } from "./space";
 import type { Topology } from "topojson-specification";
 
 const RADIUS = 1.48;
@@ -274,6 +275,9 @@ export class Globe {
   private down: [number, number] | null = null;
   private onPick: (id: string, kind: Kind) => void;
   private onEmpty: () => void;
+  /** Hooks for sound: a provider arc landed, or a cluster badge opened. */
+  onArcLand?: (order: number) => void;
+  onClusterOpen?: () => void;
   private icons = new Map<string, THREE.CanvasTexture>();
   private ringGeometry = new THREE.RingGeometry(RING_OUTER * 0.8, RING_OUTER, 40);
   private scratch = new THREE.Vector3();
@@ -332,6 +336,9 @@ export class Globe {
     const fill = new THREE.DirectionalLight(0x3a3d44, 0.4);
     fill.position.set(3.4, -1.2, -2.8);
     this.scene.add(fill);
+    this.scene.add(rimGlow(RADIUS));
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const space = new Space(this.scene, this.camera, RADIUS, still);
     this.scene.add(this.arcs, this.ripples, this.markers, this.badges);
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event) => {
@@ -346,9 +353,17 @@ export class Globe {
     });
     this.resize();
     window.addEventListener("resize", () => this.resize());
+    let last = performance.now();
     const loop = () => {
       requestAnimationFrame(loop);
+      // A hidden tab draws nothing, which saves battery and keeps the effects from piling up.
+      if (document.hidden) {
+        last = performance.now();
+        return;
+      }
       const now = performance.now();
+      space.update(Math.min((now - last) / 1000, 0.05));
+      last = now;
       this.fly(now);
       this.offsetView();
       this.controls?.update();
@@ -385,7 +400,10 @@ export class Globe {
       const line = arcLine(arc);
       const id = `${line.userData.from}>${line.userData.to}`;
       next.add(id);
-      line.userData.born = this.arcKeys.has(id) ? -Infinity : now + order++ * ARC_STAGGER_MS;
+      const settled = this.arcKeys.has(id);
+      line.userData.born = settled ? -Infinity : now + order * ARC_STAGGER_MS;
+      line.userData.order = settled ? -1 : order++;
+      line.userData.landed = settled;
       this.arcs.add(line);
     }
     this.arcKeys = next;
@@ -605,6 +623,10 @@ export class Globe {
       const elapsed = now - (line.userData.born as number);
       const grow = Math.min(Math.max(elapsed / ARC_MS, 0), 1);
       line.geometry.setDrawRange(0, Math.round(easeOut(grow) * (ARC_STEPS + 1)));
+      if (!line.userData.landed && elapsed >= ARC_MS * 0.8) {
+        line.userData.landed = true;
+        this.onArcLand?.(line.userData.order as number);
+      }
       if (grow < 1 || elapsed < ARC_MS * 1.2) {
         landing.set(line.userData.to as string, Math.min(Math.max((elapsed - ARC_MS * 0.8) / 260, 0), 1));
       }
@@ -779,6 +801,7 @@ export class Globe {
     const dist = this.camera.position.length();
     const min = this.controls?.minDistance ?? 3.1;
     const { lat, lng } = toLatLng(center);
+    this.onClusterOpen?.();
     // One click: zoom in and fan the group out together.
     const target = Math.max(min, RADIUS + (dist - RADIUS) * 0.55);
     this.focus(lat, lng, target);

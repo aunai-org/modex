@@ -1,5 +1,6 @@
 import { Globe, type Arc, type Pin, type Tone } from "./globe";
 import { locate } from "./places";
+import { cueCard, cueClear, cueCluster, cueLand, cueModel, cueProvider, cueTick, setSound, soundOn } from "./sound";
 import type { CatalogBody, Host, Lab, ModelRow, Serve } from "../shared/catalog";
 
 const RECENT_MS = 15 * 24 * 60 * 60 * 1000;
@@ -52,11 +53,14 @@ const globe = new Globe(
       hostId = null;
       const place = locate(id, "");
       if (place) globe.focus(place.lat, place.lng);
+      cueCard();
     } else if (kind === "model") {
       modelId = id;
       hostId = null;
+      cueModel();
     } else {
       hostId = id;
+      cueProvider();
       const place = locate(id, hosts.find((host) => host.id === id)?.name ?? "");
       if (place) globe.focus(place.lat, place.lng);
     }
@@ -66,6 +70,7 @@ const globe = new Globe(
     // Clicking empty globe drops the selection and closes the card.
     if (!labId && !modelId && !hostId) return;
     revealFor = null;
+    cueClear();
     labId = null;
     modelId = null;
     hostId = null;
@@ -74,6 +79,7 @@ const globe = new Globe(
 );
 
 function pickModel(model: ModelRow) {
+  cueModel();
   labId = model.lab;
   modelId = model.id;
   hostId = null;
@@ -485,6 +491,7 @@ document.querySelectorAll<HTMLButtonElement>(".legend button[data-cat]").forEach
   button.addEventListener("click", () => {
     const cat = button.dataset.cat as Category;
     show[cat] = !show[cat];
+    cueTick();
     button.classList.toggle("on", show[cat]);
     button.setAttribute("aria-pressed", String(show[cat]));
     // Drop selections that the hidden category would leave dangling.
@@ -495,10 +502,36 @@ document.querySelectorAll<HTMLButtonElement>(".legend button[data-cat]").forEach
     render();
   });
 });
-recentEl.addEventListener("click", () => setWindow(true));
-allEl.addEventListener("click", () => setWindow(false));
-refreshEl.addEventListener("click", () => void load());
+recentEl.addEventListener("click", () => {
+  cueTick();
+  setWindow(true);
+});
+allEl.addEventListener("click", () => {
+  cueTick();
+  setWindow(false);
+});
+refreshEl.addEventListener("click", () => {
+  cueTick();
+  void load();
+});
+document.querySelectorAll(".panel summary").forEach((summary) => summary.addEventListener("click", cueTick));
+globe.onArcLand = cueLand;
+globe.onClusterOpen = cueCluster;
+
+const soundEl = document.querySelector("#sound") as HTMLButtonElement;
+function paintSound() {
+  const on = soundOn();
+  soundEl.setAttribute("aria-pressed", String(on));
+  soundEl.setAttribute("aria-label", on ? "Sound on" : "Sound off");
+  soundEl.title = on ? "Sound on" : "Sound off";
+}
+soundEl.addEventListener("click", () => {
+  setSound(!soundOn());
+  paintSound();
+});
+paintSound();
 document.querySelector("#card-close")?.addEventListener("click", () => {
+  cueClear();
   if (hostId) hostId = null;
   else if (modelId) modelId = null;
   else labId = null;
