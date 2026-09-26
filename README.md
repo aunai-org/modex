@@ -9,17 +9,27 @@ npm install
 npm run dev
 ```
 
-Open the local URL Vite prints. The dev server exposes `/api/catalog` on the same origin.
+Open the local URL Vite prints. The dev server serves `/catalog.json` live from models.dev.
 
 ## Deploy
 
-Cloudflare Pages:
+Cloudflare Pages, as a fully static site:
 
 - Build command: `npm run build`
 - Output directory: `dist`
-- The `functions/` directory is the Pages Function for `/api/catalog`
+- Environment variable: `NODE_VERSION` = `22`
 
-The browser only talks to this origin. The function fetches `https://models.dev/api.json`, keeps a short summary, and caches it for an hour, in the isolate and in Cloudflare's edge cache. The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and refreshes it in the background every 30 minutes.
+`npm run build` fetches models.dev once and writes `dist/catalog.json` next to the page. If models.dev is unavailable the build fails on purpose, so Cloudflare keeps serving the last good deploy. Nothing runs per request: no Pages Function, so no CPU limit and no request quota.
+
+To keep the catalog current, `.github/workflows/rebuild.yml` triggers a rebuild every 12 hours through a Cloudflare deploy hook:
+
+1. Cloudflare → Workers & Pages → modex → Settings → Builds → Deploy hooks → create one for the branch you deploy.
+2. GitHub → Settings → Secrets and variables → Actions → add `CLOUDFLARE_DEPLOY_HOOK` with the hook URL.
+3. The workflow must be on the repository's default branch for GitHub to run it on schedule. It can also be run by hand from the Actions tab.
+
+The browser keeps the last catalog in `localStorage`, paints it at once on a return visit, and checks for a newer file every 30 minutes.
+
+The `preview` branch keeps the earlier design, a Pages Function with the Cache API, for when per-request freshness is worth the Function cost.
 
 ## Data
 

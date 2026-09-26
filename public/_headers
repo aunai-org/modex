@@ -3,3 +3,7 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# The catalog changes only when the site is rebuilt (every 12 hours); browsers may keep it for 15 minutes.
+/catalog.json
+  Cache-Control: public, max-age=900, must-revalidate

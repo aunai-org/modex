@@ -1,0 +1,31 @@
+# Rebuilds the site every 12 hours so the static catalog.json picks up models.dev changes.
+# It calls a Cloudflare Pages deploy hook; the build itself runs on Cloudflare.
+#
+# Setup (once):
+#   1. Cloudflare → Workers & Pages → modex → Settings → Builds → Deploy hooks → add a hook for the branch you deploy.
+#   2. GitHub → Settings → Secrets and variables → Actions → New secret CLOUDFLARE_DEPLOY_HOOK = the hook URL.
+#
+# GitHub runs scheduled workflows only from the default branch, so this file has to be on that branch to fire.
+name: Rebuild catalog
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Cloudflare Pages build
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::CLOUDFLARE_DEPLOY_HOOK is not set. See the setup notes at the top of this workflow."
+            exit 1
+          fi
+          curl --fail --silent --show-error -X POST "$HOOK"
