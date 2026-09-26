@@ -2,7 +2,7 @@
 
 **The [models.dev](https://models.dev) index, on a map.**
 
-![Modex showing Claude Opus 5.5 with arcs from Anthropic to the providers that serve it](docs/media/model-providers.png)
+![Picking GPT-6 Luna in Modex: arcs draw out from OpenAI to each provider that serves it](docs/media/arcs.gif)
 
 Modex puts the AI model world on a globe. Every AI lab sits where it's based. Click one and its models fan out around it. Pick a model and you'll see arcs reaching out to every provider that serves it, from the lab's own API to cloud platforms and gateways around the world.
 
@@ -22,11 +22,11 @@ It works on phones too, and it remembers the last catalog it loaded, so return v
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/arcs.gif" alt="Selecting GPT-6 Luna: arcs draw out from OpenAI to each provider, which pop in as they land"></td>
+    <td width="50%"><img src="docs/media/model-providers.png" alt="Claude Opus 5.5 selected, with its card and arcs from Anthropic to the providers that serve it"></td>
     <td width="50%"><img src="docs/media/lab-models.png" alt="Alibaba selected in Hangzhou, its newest models ringed around it and nearby providers pinned"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Pick a model and arcs draw out to every provider that serves it.</sub></td>
+    <td align="center"><sub>Each model card lists specs and how many providers serve it.</sub></td>
     <td align="center"><sub>Pick a lab and its newest models ring around it.</sub></td>
   </tr>
   <tr>
