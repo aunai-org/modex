@@ -14,4 +14,9 @@ function catalog(): Plugin {
   };
 }
 
-export default defineConfig({ plugins: [catalog()] });
+const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+
+export default defineConfig({
+  plugins: [catalog()],
+  server: { port: Number(env.PORT) || 5173 },
+});

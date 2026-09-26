@@ -1,6 +1,6 @@
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
 import "./style.css";
 import { Globe, type GeoPin, type SatPin } from "./globe";
 import { locate } from "./places";
@@ -8,11 +8,18 @@ import type { CatalogBody, Host, Lab, ModelRow, Serve } from "../shared/catalog"
 
 const RECENT_MS = 15 * 24 * 60 * 60 * 1000;
 const MODEL_CAP = 12;
+const LATEST_CAP = 30;
+const CROWD_DEG = 3;
+const SPREAD_DEG = 2.2;
 
 const statusEl = document.querySelector("#status") as HTMLElement;
+const clockEl = document.querySelector("#clock") as HTMLElement;
 const cardEl = document.querySelector("#card") as HTMLElement;
 const searchEl = document.querySelector("#search") as HTMLInputElement;
 const recentEl = document.querySelector("#recent") as HTMLButtonElement;
+const allEl = document.querySelector("#win-all") as HTMLButtonElement;
+const refreshEl = document.querySelector("#refresh") as HTMLButtonElement;
+const latestEl = document.querySelector("#latest") as HTMLElement;
 
 let labs: Lab[] = [];
 let models: ModelRow[] = [];
@@ -23,6 +30,11 @@ let recentOnly = false;
 let labId: string | null = null;
 let modelId: string | null = null;
 let hostId: string | null = null;
+let fetchedAt = "";
+let notice = "";
+
+type Category = "lab" | "model" | "host" | "pulse";
+const show: Record<Category, boolean> = { lab: true, model: true, host: true, pulse: true };
 
 const globe = new Globe(document.querySelector("#globe") as HTMLElement, (id, kind) => {
   if (kind === "lab") {
@@ -42,10 +54,24 @@ const globe = new Globe(document.querySelector("#globe") as HTMLElement, (id, ki
   render();
 });
 
+function pickModel(model: ModelRow) {
+  labId = model.lab;
+  modelId = model.id;
+  hostId = null;
+  const place = locate(model.lab, "");
+  if (place) globe.focus(place.lat, place.lng);
+  render();
+}
+
 function recent(model: ModelRow): boolean {
   if (!model.release) return false;
   const time = Date.parse(`${model.release}T00:00:00Z`);
   return Number.isFinite(time) && Date.now() - time <= RECENT_MS && Date.now() >= time;
+}
+
+function ago(release: string): string {
+  const days = Math.floor((Date.now() - Date.parse(`${release}T00:00:00Z`)) / 86400000);
+  return days <= 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
 function labModels(id: string): ModelRow[] {
@@ -57,6 +83,32 @@ function hostsFor(id: string): Host[] {
   return hosts.filter((host) => ids.has(host.id));
 }
 
+function hostsServing(list: ModelRow[]): Host[] {
+  const wanted = new Set(list.map((model) => model.id));
+  const ids = new Set(serves.filter((link) => wanted.has(link.model)).map((link) => link.host));
+  return hosts.filter((host) => ids.has(host.id));
+}
+
+/** Pins in the same metro area spiral out from its first pin instead of stacking. */
+function spreader() {
+  const crowd = new Map<string, { lat: number; lng: number; n: number }>();
+  return (lat: number, lng: number) => {
+    const key = `${Math.round(lat / CROWD_DEG)}:${Math.round(lng / CROWD_DEG)}`;
+    const seen = crowd.get(key);
+    if (!seen) {
+      crowd.set(key, { lat, lng, n: 1 });
+      return { lat, lng };
+    }
+    const n = seen.n++;
+    const angle = n * 2.4;
+    const step = SPREAD_DEG * Math.sqrt(n);
+    return {
+      lat: seen.lat + Math.sin(angle) * step,
+      lng: seen.lng + (Math.cos(angle) * step) / Math.max(Math.cos((seen.lat * Math.PI) / 180), 0.2),
+    };
+  };
+}
+
 function render() {
   const q = query.trim().toLowerCase();
   const shownLabs = labs.filter((lab) => {
@@ -65,20 +117,23 @@ function render() {
     return locate(lab.id, lab.name) !== null;
   });
   const geo: GeoPin[] = [];
-  for (const lab of shownLabs) {
+  const spot = spreader();
+  const labSpot = new Map<string, { lat: number; lng: number }>();
+  for (const lab of show.lab ? shownLabs : []) {
     const place = locate(lab.id, lab.name);
     if (!place) continue;
+    const at = spot(place.lat, place.lng);
+    labSpot.set(lab.id, at);
     geo.push({
       id: lab.id,
       kind: "lab",
-      lat: place.lat,
-      lng: place.lng,
-      ripple: labModels(lab.id).some(recent),
+      ...at,
+      ripple: show.pulse && labModels(lab.id).some(recent),
     });
   }
   const openLab = labs.find((lab) => lab.id === labId) ?? null;
-  const spawned = openLab ? labModels(openLab.id).slice(0, MODEL_CAP) : [];
-  const place = openLab ? locate(openLab.id, openLab.name) : null;
+  const spawned = openLab && show.model ? labModels(openLab.id).slice(0, MODEL_CAP) : [];
+  const place = openLab ? labSpot.get(openLab.id) ?? locate(openLab.id, openLab.name) : null;
   const sats: SatPin[] = place
     ? spawned.map((model, index) => ({
         id: model.id,
@@ -86,31 +141,89 @@ function render() {
         lng: place.lng,
         index,
         count: spawned.length,
-        ripple: recent(model),
+        ripple: show.pulse && recent(model),
       }))
     : [];
   const openModel = models.find((model) => model.id === modelId) ?? null;
   const openHosts = openModel ? hostsFor(openModel.id) : [];
-  if (openModel) {
-    openHosts.forEach((host, index) => {
+  // With a model open, pin who serves it. Otherwise pin every provider serving a visible lab's models.
+  const visible = shownLabs.flatMap((lab) => labModels(lab.id));
+  const pinnedHosts = openModel ? openHosts : hostsServing(visible);
+  if (show.host) {
+    const freshIds = new Set(visible.filter(recent).map((model) => model.id));
+    const freshHosts = new Set(serves.filter((link) => freshIds.has(link.model)).map((link) => link.host));
+    for (const host of pinnedHosts) {
       const where = locate(host.id, host.name);
-      if (!where) return;
+      if (!where) continue;
       geo.push({
         id: host.id,
         kind: "host",
-        lat: where.lat,
-        lng: where.lng + index * 0.35,
-        ripple: recent(openModel),
+        ...spot(where.lat, where.lng),
+        ripple: show.pulse && (openModel ? recent(openModel) : freshHosts.has(host.id)),
       });
-    });
+    }
   }
   const selected = hostId ?? modelId ?? labId;
   globe.show(geo, sats, selected);
-  paintCard(openLab, openModel, openHosts);
+  paintCard(openLab, openModel, openHosts, pinnedHosts);
+  paintCounts(shownLabs, pinnedHosts);
+  paintLatest(q);
+}
+
+function setText(selector: string, value: string) {
+  const el = document.querySelector(selector);
+  if (el) el.textContent = value;
+}
+
+function paintCounts(shownLabs: Lab[], pinnedHosts: Host[]) {
   const fresh = models.filter(recent).length;
-  statusEl.textContent = globe.ready
-    ? `${shownLabs.length} labs · ${fresh} models in 15 days`
-    : "WebGL is unavailable.";
+  setText("#count-all", String(models.length));
+  setText("#count-recent", String(fresh));
+  setText("#count-labs", String(shownLabs.length));
+  setText("#count-models", String(recentOnly ? fresh : models.length));
+  setText("#count-hosts", String(pinnedHosts.filter((host) => locate(host.id, host.name)).length));
+  setText("#count-pulse", String(fresh));
+  const time = fetchedAt ? new Date(fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  clockEl.textContent = time ? `Updated ${time}` : "";
+  if (!globe.ready) statusEl.textContent = "WebGL is unavailable.";
+  else if (notice) statusEl.textContent = notice;
+  else statusEl.textContent = `${models.length} models · ${hosts.length} providers loaded`;
+}
+
+function paintLatest(q: string) {
+  const labName = new Map(labs.map((lab) => [lab.id, lab.name]));
+  const rows = (show.model ? models : [])
+    .filter((model) => model.release && (!recentOnly || recent(model)))
+    .filter((model) => !q || model.lab.includes(q) || (labName.get(model.lab) ?? "").toLowerCase().includes(q))
+    .slice(0, LATEST_CAP);
+  setText("#latest-count", String(rows.length));
+  latestEl.replaceChildren();
+  if (!rows.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = show.model ? "No models match." : "Models are hidden.";
+    latestEl.append(li);
+    return;
+  }
+  for (const model of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.classList.toggle("on", model.id === modelId);
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = model.name;
+    const by = document.createElement("span");
+    by.className = "by";
+    by.textContent = `${labName.get(model.lab) ?? model.lab} · ${model.id}`;
+    const date = document.createElement("span");
+    date.className = "date";
+    date.textContent = recent(model) ? `${model.release} · ${ago(model.release)}` : model.release;
+    button.append(name, by, date);
+    button.addEventListener("click", () => pickModel(model));
+    const li = document.createElement("li");
+    li.append(button);
+    latestEl.append(li);
+  }
 }
 
 function yn(value: boolean): string {
@@ -121,27 +234,39 @@ function num(value: number): string {
   return value ? value.toLocaleString("en-US") : "—";
 }
 
-function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[]) {
-  const host = openHosts.find((item) => item.id === hostId) ?? null;
-  cardEl.hidden = !lab && !model;
-  if (!lab && !model) return;
+function hq(id: string, name: string): string {
+  const where = locate(id, name);
+  return where ? `${where.city}, ${where.region} · approx.` : "No pin";
+}
+
+function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], pinnedHosts: Host[]) {
+  const host = (model ? openHosts : pinnedHosts).find((item) => item.id === hostId) ?? null;
+  cardEl.hidden = !lab && !model && !host;
+  if (cardEl.hidden) return;
   const title = document.querySelector("#card-name") as HTMLElement;
   const eyebrow = document.querySelector("#card-id") as HTMLElement;
   const sub = document.querySelector("#card-sub") as HTMLElement;
+  const when = document.querySelector("#card-when") as HTMLElement;
   const body = document.querySelector("#card-body") as HTMLElement;
   body.replaceChildren();
-  if (host && model && lab) {
+  if (host) {
+    const served = new Set(serves.filter((link) => link.host === host.id).map((link) => link.model));
+    const byLab = labs.filter((item) => models.some((row) => row.lab === item.id && served.has(row.id)));
     title.textContent = host.name;
     eyebrow.textContent = "PROVIDER";
-    sub.textContent = host.id;
-    addFact(body, "Models", String(host.models));
+    when.textContent = `${host.models} models listed`;
+    sub.textContent = `inspect provider ${host.id}`;
+    if (model) addFact(body, "Serving", model.name);
+    addFact(body, "Lab models", String(served.size));
+    addFact(body, "Labs", byLab.map((item) => item.name).join(" · ") || "—");
+    addFact(body, "HQ", hq(host.id, host.name));
     addFact(body, "Package", host.npm || "—");
-    addFact(body, "API", host.api || "—");
-    addFact(body, "Serving", model.name);
+    addFact(body, "API", host.api || "—", host.api || undefined);
   } else if (model && lab) {
     title.textContent = model.name;
     eyebrow.textContent = "MODEL";
-    sub.textContent = model.id;
+    when.textContent = model.release ? (recent(model) ? `${model.release} · ${ago(model.release)}` : model.release) : "Release date unknown";
+    sub.textContent = `inspect model ${model.id}`;
     addFact(body, "Lab", lab.name);
     addFact(body, "Providers", String(openHosts.length));
     addFact(body, "Context", num(model.context));
@@ -153,28 +278,43 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[]) {
     addFact(body, "Temperature", yn(model.temperature));
     addFact(body, "Weights", model.open ? "Open" : "Closed");
   } else if (lab) {
+    const fresh = models.filter((item) => item.lab === lab.id && recent(item)).length;
     title.textContent = lab.name;
     eyebrow.textContent = "LAB";
-    sub.textContent = lab.id;
-    addFact(body, "Models", String(lab.models));
-    addFact(body, "Description", lab.description || "—");
-    const where = locate(lab.id, lab.name);
-    addFact(body, "Place", where ? `${where.city} · approximate HQ` : "No pin");
+    when.textContent = `${lab.models} models${fresh ? ` · ${fresh} in 15 days` : ""}`;
+    sub.textContent = `inspect lab ${lab.id}`;
+    addFact(body, "HQ", hq(lab.id, lab.name));
+    addFact(body, "Newest", labModels(lab.id)[0]?.name ?? "—");
+    addFact(body, "About", lab.description || "—");
   }
 }
 
-function addFact(root: HTMLElement, label: string, value: string) {
+function addFact(root: HTMLElement, label: string, value: string, href?: string) {
   const row = document.createElement("div");
   const dt = document.createElement("dt");
   dt.textContent = label;
   const dd = document.createElement("dd");
-  dd.textContent = value;
+  if (value === "Yes" || value === "Open") dd.className = "yes";
+  else if (value === "No") dd.className = "no";
+  if (href) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = value;
+    dd.append(link);
+  } else {
+    dd.textContent = value;
+  }
   row.append(dt, dd);
   root.append(row);
 }
 
 async function load() {
   statusEl.textContent = "Loading catalog…";
+  refreshEl.classList.add("spin");
+  refreshEl.disabled = true;
+  notice = "";
   try {
     const res = await fetch("/api/catalog");
     if (!res.ok) throw new Error(String(res.status));
@@ -183,13 +323,30 @@ async function load() {
     models = body.models ?? [];
     hosts = body.hosts ?? [];
     serves = body.serves ?? [];
-    if (body.error) statusEl.textContent = body.error;
+    fetchedAt = body.fetchedAt ?? "";
+    notice = body.error ?? "";
   } catch {
     labs = [];
     models = [];
     hosts = [];
     serves = [];
-    statusEl.textContent = "Catalog request failed.";
+    notice = "Catalog request failed.";
+  }
+  refreshEl.classList.remove("spin");
+  refreshEl.disabled = false;
+  render();
+}
+
+function setWindow(onlyRecent: boolean) {
+  recentOnly = onlyRecent;
+  recentEl.setAttribute("aria-pressed", String(recentOnly));
+  recentEl.classList.toggle("on", recentOnly);
+  allEl.setAttribute("aria-pressed", String(!recentOnly));
+  allEl.classList.toggle("on", !recentOnly);
+  if (labId && !labModels(labId).length) {
+    labId = null;
+    modelId = null;
+    hostId = null;
   }
   render();
 }
@@ -198,18 +355,24 @@ searchEl.addEventListener("input", () => {
   query = searchEl.value;
   render();
 });
-recentEl.addEventListener("click", () => {
-  recentOnly = !recentOnly;
-  recentEl.setAttribute("aria-pressed", String(recentOnly));
-  recentEl.classList.toggle("on", recentOnly);
-  if (labId && !labModels(labId).length) {
-    labId = null;
-    modelId = null;
-    hostId = null;
-  }
-  render();
+document.querySelectorAll<HTMLButtonElement>(".legend button[data-cat]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const cat = button.dataset.cat as Category;
+    show[cat] = !show[cat];
+    button.classList.toggle("on", show[cat]);
+    button.setAttribute("aria-pressed", String(show[cat]));
+    // Drop selections that the hidden category would leave dangling.
+    if (!show.model) {
+      modelId = null;
+      hostId = null;
+    }
+    if (!show.host) hostId = null;
+    render();
+  });
 });
-document.querySelector("#refresh")?.addEventListener("click", () => void load());
+recentEl.addEventListener("click", () => setWindow(true));
+allEl.addEventListener("click", () => setWindow(false));
+refreshEl.addEventListener("click", () => void load());
 document.querySelector("#card-close")?.addEventListener("click", () => {
   if (hostId) hostId = null;
   else if (modelId) modelId = null;

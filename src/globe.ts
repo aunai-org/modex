@@ -7,8 +7,13 @@ import world from "world-atlas/countries-110m.json";
 import type { Topology } from "topojson-specification";
 
 const RADIUS = 1.48;
+const RING_OUTER = 0.05;
+const FLIGHT_MS = 700;
 
 export type Kind = "lab" | "model" | "host";
+
+/** On-screen marker size in CSS pixels, whatever the zoom. */
+const MARKER_PX: Record<Kind, number> = { lab: 22, host: 18, model: 16 };
 
 export type GeoPin = {
   id: string;
@@ -38,24 +43,42 @@ function icon(kind: Kind, on: boolean): THREE.CanvasTexture {
   canvas.width = canvas.height = 96;
   const g = canvas.getContext("2d");
   if (!g) throw new Error("canvas");
-  const color = on ? "#f54e00" : kind === "host" ? "#9ecbff" : "#f4f4f4";
+  const color = on ? "#f5a04a" : kind === "host" ? "#9ecbff" : "#f4f4f4";
   g.clearRect(0, 0, 96, 96);
   g.strokeStyle = color;
   g.fillStyle = "#101114";
   g.lineWidth = on ? 7 : 4;
   if (kind === "lab") {
+    // Hexagon hub with a three-node network inside.
     g.beginPath();
-    g.roundRect(18, 22, 60, 48, 8);
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i - Math.PI / 2;
+      const x = 48 + Math.cos(a) * 38;
+      const y = 48 + Math.sin(a) * 38;
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
     g.fill();
     g.stroke();
+    const nodes: [number, number][] = [
+      [48, 30],
+      [33, 57],
+      [63, 57],
+    ];
+    g.lineWidth = on ? 4 : 3;
     g.beginPath();
-    g.moveTo(30, 46);
-    g.lineTo(30, 70);
-    g.moveTo(48, 38);
-    g.lineTo(48, 70);
-    g.moveTo(66, 50);
-    g.lineTo(66, 70);
+    g.moveTo(...nodes[0]);
+    g.lineTo(...nodes[1]);
+    g.lineTo(...nodes[2]);
+    g.closePath();
     g.stroke();
+    g.fillStyle = color;
+    for (const [x, y] of nodes) {
+      g.beginPath();
+      g.arc(x, y, 6.5, 0, Math.PI * 2);
+      g.fill();
+    }
   } else if (kind === "model") {
     g.beginPath();
     g.moveTo(48, 14);
@@ -137,6 +160,9 @@ export class Globe {
   private onPick: (id: string, kind: Kind) => void;
   private frame = 0;
   private icons = new Map<string, THREE.CanvasTexture>();
+  private ringGeometry = new THREE.RingGeometry(RING_OUTER * 0.8, RING_OUTER, 40);
+  private scratch = new THREE.Vector3();
+  private flight: { from: THREE.Quaternion; to: THREE.Quaternion; dir: THREE.Vector3; start: number } | null = null;
 
   constructor(private root: HTMLElement, onPick: (id: string, kind: Kind) => void) {
     this.onPick = onPick;
@@ -159,6 +185,9 @@ export class Globe {
     this.controls.zoomSpeed = 0.55;
     this.controls.minDistance = 3.1;
     this.controls.maxDistance = 9;
+    this.controls.addEventListener("start", () => {
+      this.flight = null;
+    });
     const globe = new THREE.Mesh(
       new THREE.SphereGeometry(RADIUS, 40, 28),
       new THREE.MeshPhongMaterial({ map: earthTexture(this.renderer), specular: 0x111111, shininess: 4 }),
@@ -181,24 +210,16 @@ export class Globe {
     window.addEventListener("resize", () => this.resize());
     const loop = () => {
       this.frame = requestAnimationFrame(loop);
-      const t = performance.now() / 1000;
-      for (const ring of this.ripples.children) {
-        const phase = (t + (ring.userData.phase as number)) % 1.6;
-        const k = phase / 1.6;
-        const base = (ring.userData.base as number) || 0.03;
-        ring.scale.setScalar((base / 0.03) * (1 + k * 2.2));
-        (ring as THREE.Mesh).material && (((ring as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - k));
-      }
+      this.fly(performance.now());
       this.controls?.update();
-      this.fitMarkers();
+      this.fitMarkers(performance.now() / 1000);
       this.renderer?.render(this.scene, this.camera);
     };
     loop();
   }
 
   show(geo: GeoPin[], sats: SatPin[], selected: string | null) {
-    this.markers.clear();
-    this.ripples.clear();
+    this.clear();
     for (const pin of geo.filter((item) => item.kind === "lab")) {
       this.add(pin.id, pin.kind, toVector(pin.lat, pin.lng, RADIUS + 0.02), pin.id === selected, pin.ripple);
     }
@@ -210,23 +231,56 @@ export class Globe {
     }
   }
 
-  private fitMarkers() {
-    const dist = this.camera.position.length();
-    const size = Math.min(0.042, Math.max(0.014, dist * 0.0055));
+  /** Keep every marker a fixed pixel size per kind, and hide what the Earth blocks. */
+  private fitMarkers(t: number) {
+    const cam = this.camera.position;
+    const height = Math.max(this.renderer?.domElement.clientHeight ?? 1, 1);
+    const perPx = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / height;
+    const horizon = RADIUS * RADIUS;
+    const place = (obj: THREE.Object3D, px: number) => {
+      const surface = this.scratch.copy(obj.position).setLength(RADIUS);
+      const facing = surface.dot(cam) - horizon;
+      obj.visible = facing > 0;
+      return px * perPx * obj.position.distanceTo(cam);
+    };
     for (const child of this.markers.children) {
       const on = child.userData.on === true;
-      const kind = child.userData.kind;
-      const scale = size * (on ? 1.2 : kind === "model" ? 0.72 : kind === "host" ? 0.82 : 1);
-      child.scale.set(scale, scale, 1);
+      const px = MARKER_PX[child.userData.kind as Kind] * (on ? 1.3 : 1);
+      const size = place(child, px);
+      child.scale.set(size, size, 1);
     }
     for (const ring of this.ripples.children) {
-      ring.userData.base = size;
+      const size = place(ring, MARKER_PX[ring.userData.kind as Kind]);
+      const k = ((t + (ring.userData.phase as number)) % 1.6) / 1.6;
+      ring.scale.setScalar((size / 2 / RING_OUTER) * (1 + k * 1.6));
+      ((ring as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.75 * (1 - k);
     }
   }
 
+  private clear() {
+    for (const child of [...this.markers.children, ...this.ripples.children]) {
+      const material = (child as THREE.Sprite | THREE.Mesh).material;
+      if (material && !Array.isArray(material)) material.dispose();
+    }
+    this.markers.clear();
+    this.ripples.clear();
+  }
+
+  /** Turn the globe to face a place, keeping the current zoom. */
   focus(lat: number, lng: number) {
-    this.camera.position.copy(toVector(lat, lng, 5.4));
-    this.controls?.update();
+    const from = this.camera.position.clone().normalize();
+    const to = toVector(lat, lng, 1).normalize();
+    this.flight = { from: new THREE.Quaternion(), to: new THREE.Quaternion().setFromUnitVectors(from, to), dir: from, start: performance.now() };
+  }
+
+  private fly(now: number) {
+    if (!this.flight) return;
+    const k = Math.min((now - this.flight.start) / FLIGHT_MS, 1);
+    const ease = 1 - Math.pow(1 - k, 3);
+    const turn = this.flight.from.clone().slerp(this.flight.to, ease);
+    const dist = this.camera.position.length();
+    this.camera.position.copy(this.flight.dir).applyQuaternion(turn).setLength(dist);
+    if (k === 1) this.flight = null;
   }
 
   private tex(kind: Kind, on: boolean): THREE.CanvasTexture {
@@ -250,9 +304,9 @@ export class Globe {
     this.markers.add(sprite);
     if (!ripple) return;
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.03, 0.038, 28),
+      this.ringGeometry,
       new THREE.MeshBasicMaterial({
-        color: on ? 0xf54e00 : 0xf4f4f4,
+        color: on ? 0xf5a04a : 0xf4f4f4,
         transparent: true,
         opacity: 0.7,
         side: THREE.DoubleSide,
@@ -262,6 +316,7 @@ export class Globe {
     ring.position.copy(position);
     ring.lookAt(position.clone().multiplyScalar(2));
     ring.userData.phase = Math.random();
+    ring.userData.kind = kind;
     this.ripples.add(ring);
   }
 
@@ -280,7 +335,7 @@ export class Globe {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.ray.setFromCamera(this.pointer, this.camera);
-    const hit = this.ray.intersectObjects(this.markers.children, false)[0];
+    const hit = this.ray.intersectObjects(this.markers.children, false).find((item) => item.object.visible);
     const id = hit?.object.userData.id;
     const kind = hit?.object.userData.kind;
     if (typeof id === "string" && (kind === "lab" || kind === "model" || kind === "host")) this.onPick(id, kind);
