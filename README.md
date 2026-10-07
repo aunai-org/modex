@@ -82,7 +82,7 @@ Modex is an independent project. It isn't affiliated with models.dev or with any
 
 ## License
 
-Copyright (C) 2026 Modex.
+Copyright (C) 2026 aunai-org ([aunai.org](https://aunai.org)).
 
 Modex is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You can use, study, change, and share it. If you run a modified version for others, including as a website, you need to share your changes under the same license. It comes with no warranty: the authors aren't liable for how it's used.
 

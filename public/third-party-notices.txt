@@ -1,6 +1,6 @@
 Third-party notices for Modex
 
-Modex (© 2026 Modex, AGPL-3.0) bundles or redistributes the works below.
+Modex (© 2026 aunai-org (aunai.org), AGPL-3.0) bundles or redistributes the works below.
 Each is used under its own license, reproduced here as that license requires.
 
 ========================================================================
