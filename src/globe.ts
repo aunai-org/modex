@@ -295,6 +295,9 @@ export class Globe {
   private compact = false;
   /** Screen space covered by panels; the globe centres itself in what is left. */
   private inset = { left: 0, bottom: 0 };
+  /** The last move was a provider framing, so keep it centred in the space the card leaves free. */
+  private framed = false;
+  private room = { left: 0, bottom: 0 };
   private shift = { x: 0, y: 0 };
   private tip: HTMLElement;
   private hover: [number, number] | null = null;
@@ -422,6 +425,8 @@ export class Globe {
 
   /** Turn the globe to face a place. Keeps the current zoom unless a distance is given. */
   focus(lat: number, lng: number, distance?: number) {
+    this.framed = false;
+    this.inset = this.compact ? this.room : { left: 0, bottom: 0 };
     const from = this.camera.position.clone().normalize();
     const to = toVector(lat, lng, 1).normalize();
     const d0 = this.camera.position.length();
@@ -438,7 +443,8 @@ export class Globe {
   /** Compact layout (small screens): capped rings, smaller markers, and a globe centred in the free area. */
   setLayout(compact: boolean, inset: { left: number; bottom: number }) {
     this.compact = compact;
-    this.inset = compact ? inset : { left: 0, bottom: 0 };
+    this.room = inset;
+    this.inset = compact || this.framed ? inset : { left: 0, bottom: 0 };
   }
 
   private markerScale(): number {
@@ -474,6 +480,8 @@ export class Globe {
     const { lat, lng } = toLatLng(center);
     this.spider = null;
     this.focus(lat, lng, distance);
+    this.framed = true;
+    this.inset = this.room;
   }
 
   private fly(now: number) {

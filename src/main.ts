@@ -351,9 +351,9 @@ function num(value: number): string {
   return value ? value.toLocaleString("en-US") : "—";
 }
 
-function hq(id: string, name: string): string {
+function basedIn(id: string, name: string): string {
   const where = locate(id, name);
-  return where ? `${where.city}, ${where.region} · approx.` : "No pin";
+  return where ? `Based in ${where.city}, ${where.region} (approximate)` : "Not pinned on the map";
 }
 
 function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], openHost: Host | null) {
@@ -366,58 +366,279 @@ function paintCard(lab: Lab | null, model: ModelRow | null, openHosts: Host[], o
   const when = document.querySelector("#card-when") as HTMLElement;
   const body = document.querySelector("#card-body") as HTMLElement;
   body.replaceChildren();
+  cardEl.classList.toggle("model", !host && !!model && !!lab);
+  cardEl.classList.toggle("glance", !!host || !(model && lab));
   if (host) {
     const served = new Set(serves.filter((link) => link.host === host.id).map((link) => link.model));
     const byLab = labs.filter((item) => models.some((row) => row.lab === item.id && served.has(row.id)));
     title.textContent = host.name;
     eyebrow.textContent = "PROVIDER";
-    when.textContent = `${host.models} models listed`;
+    when.textContent = basedIn(host.id, host.name);
     sub.textContent = `inspect provider ${host.id}`;
-    if (model) addFact(body, "Serving", model.name);
-    addFact(body, "Lab models", String(served.size));
-    addFact(body, "Labs", byLab.map((item) => item.name).join(" · ") || "—");
-    addFact(body, "HQ", hq(host.id, host.name));
-    addFact(body, "Package", host.npm || "—");
-    addFact(body, "API", host.api || "—", host.api || undefined);
+    paintHost(body, host, served, byLab, model);
   } else if (model && lab) {
     title.textContent = model.name;
     eyebrow.textContent = "MODEL";
-    when.textContent = model.release ? (recent(model) ? `${model.release} · ${ago(model.release)}` : model.release) : "Release date unknown";
+    const date = model.release ? (recent(model) ? `${model.release} · ${ago(model.release)}` : model.release) : "Release date unknown";
+    when.textContent = `${lab.name} · ${date}`;
     sub.textContent = `inspect model ${model.id}`;
-    addFact(body, "Lab", lab.name);
-    const mapped = openHosts.filter((item) => locate(item.id, item.name));
-    const summary = `${openHosts.length} · ${mapped.length} on map`;
-    if (mapped.length) addFact(body, "Providers", summary, () => frameProviders(lab, mapped));
-    else addFact(body, "Providers", summary);
-    addFact(body, "Context", num(model.context));
-    addFact(body, "Output", num(model.output));
-    addFact(body, "Input", model.input.join(" · ") || "—");
-    addFact(body, "Reasoning", yn(model.reasoning));
-    addFact(body, "Tool call", yn(model.tools));
-    addFact(body, "Structured", yn(model.structured));
-    addFact(body, "Temperature", yn(model.temperature));
-    addFact(body, "Weights", model.open ? "Open" : "Closed");
+    paintModel(body, lab, openHosts, model);
   } else if (lab) {
     const fresh = models.filter((item) => item.lab === lab.id && recent(item)).length;
     title.textContent = lab.name;
     eyebrow.textContent = "LAB";
-    when.textContent = `${lab.models} models${fresh ? ` · ${fresh} in 15 days` : ""}`;
+    when.textContent = basedIn(lab.id, lab.name);
     sub.textContent = `inspect lab ${lab.id}`;
-    addFact(body, "HQ", hq(lab.id, lab.name));
-    addFact(body, "Newest", labModels(lab.id)[0]?.name ?? "—");
     const served = hostsServing(labModels(lab.id));
-    const mapped = served.filter((item) => locate(item.id, item.name));
-    const summary = `${served.length} · ${mapped.length} on map`;
-    if (mapped.length) {
-      addFact(body, "Providers", summary, () => {
-        revealFor = lab.id;
-        render();
-        frameProviders(lab, mapped);
-      });
-    } else {
-      addFact(body, "Providers", summary);
+    paintLab(body, lab, fresh, served, served.filter((item) => locate(item.id, item.name)));
+  }
+}
+
+const ICON: Record<string, string> = {
+  context: "M5 3.5H3.5v9H5M11 3.5h1.5v9H11M6.5 8h3",
+  output: "M3 8h9M8.5 4.5 12 8l-3.5 3.5",
+  text: "M3.5 4.5h9M8 4.5v8",
+  image: "M2.5 3.5h11v9h-11zM2.5 10.5l3.2-3 2.8 2.8 1.7-1.6 3.3 3.1M10.6 6h.01",
+  pdf: "M4 2.5h5.5L12 5v8.5H4zM9.5 2.5V5H12M6 8.5h4M6 10.8h4",
+  audio: "M8 2.5v11M5 5v6M11 5v6M2.5 7v2M13.5 7v2",
+  video: "M2.5 4.5h7v7h-7zM9.5 7l4-2v6l-4-2",
+  reasoning: "M8 1.8 9.5 6.5 14.2 8 9.5 9.5 8 14.2 6.5 9.5 1.8 8 6.5 6.5Z",
+  tools: "M3 4.5l4 3.5-4 3.5M8.5 12h4.5",
+  structured:
+    "M6.2 2.5c-1.5 0-1.7 1-1.7 2v1.3c0 1-.7 2.2-2 2.2 1.3 0 2 1.2 2 2.2v1.3c0 1 .2 2 1.7 2M9.8 2.5c1.5 0 1.7 1 1.7 2v1.3c0 1 .7 2.2 2 2.2-1.3 0-2 1.2-2 2.2v1.3c0 1-.2 2-1.7 2",
+  dash: "M4 8h8",
+  closed: "M4.5 7.5h7v5.5h-7zM6 7.5V5.5a2 2 0 0 1 4 0v2",
+  open: "M4.5 7.5h7v5.5h-7zM6 7.5V5.5a2 2 0 0 1 3.7-1",
+};
+
+function svg(path: string, size = 14): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 16 16" aria-hidden="true"><path d="${path}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+/** A ring with a centre dot, the same mark as the provider legend. */
+function ring(lit: boolean): string {
+  return `<span class="ring${lit ? " lit" : ""}"><i></i></span>`;
+}
+
+function section(root: HTMLElement, title: string): HTMLElement {
+  const wrap = document.createElement("section");
+  wrap.className = "sec";
+  const label = document.createElement("p");
+  label.className = "sec-title";
+  label.textContent = title;
+  wrap.append(label);
+  root.append(wrap);
+  return wrap;
+}
+
+function chip(className: string, icon: string, text: string): HTMLElement {
+  const el = document.createElement("span");
+  el.className = className;
+  el.innerHTML = svg(icon);
+  el.append(text);
+  return el;
+}
+
+/** Short form for token counts: 1,000,000 → 1M, 128,000 → 128K. */
+function tokens(value: number): string {
+  if (!value) return "—";
+  if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1000) return `${+(value / 1000).toFixed(1)}K`;
+  return String(value);
+}
+
+/** The model card body: limits, inputs, capabilities, and who serves it, each in its own band. */
+function paintModel(root: HTMLElement, lab: Lab, openHosts: Host[], model: ModelRow) {
+  const mapped = openHosts.filter((item) => locate(item.id, item.name));
+
+  const limits = section(root, "LIMITS");
+  const tiles = document.createElement("div");
+  tiles.className = "tiles";
+  for (const [label, icon, value] of [
+    ["Context window", ICON.context, model.context],
+    ["Max output", ICON.output, model.output],
+  ] as const) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    const head = document.createElement("span");
+    head.className = "tile-label";
+    head.innerHTML = svg(icon);
+    head.append(label);
+    const big = document.createElement("span");
+    big.className = "tile-big";
+    big.textContent = tokens(value);
+    const small = document.createElement("span");
+    small.className = "tile-small";
+    small.textContent = value ? `${num(value)} tokens` : "not listed";
+    tile.append(head, big, small);
+    tiles.append(tile);
+  }
+  limits.append(tiles);
+
+  const input = section(root, "INPUT");
+  const kinds = document.createElement("div");
+  kinds.className = "chips";
+  for (const kind of model.input.length ? model.input : ["text"]) kinds.append(chip("chip", ICON[kind] ?? ICON.text, kind));
+  input.append(kinds);
+
+  const caps = section(root, "CAPABILITIES");
+  const pills = document.createElement("div");
+  pills.className = "chips";
+  const flag = (on: boolean, icon: string, yes: string, no: string) => chip(on ? "pill on" : "pill off", on ? icon : ICON.dash, on ? yes : no);
+  pills.append(
+    flag(model.reasoning, ICON.reasoning, "Reasoning", "No reasoning"),
+    flag(model.tools, ICON.tools, "Tool call", "No tool call"),
+    flag(model.structured, ICON.structured, "Structured output", "No structured output"),
+    flag(model.temperature, ICON.dash, "Temperature", "Temperature: off"),
+    chip("pill plain", model.open ? ICON.open : ICON.closed, model.open ? "Open weights" : "Closed weights"),
+  );
+  caps.append(pills);
+
+  const band = document.createElement("section");
+  band.className = "sec";
+  const box = document.createElement("div");
+  box.className = "hosts";
+  const head = document.createElement("div");
+  head.className = "hosts-head";
+  head.innerHTML = `<span class="hosts-label">${ring(true)}Providers</span>`;
+  const count = document.createElement("span");
+  count.className = "hosts-count";
+  count.append(String(openHosts.length));
+  const serve = document.createElement("small");
+  serve.textContent = " serve it";
+  count.append(serve);
+  head.append(count);
+  const lit = Math.min(mapped.length, 40);
+  const dots = document.createElement("div");
+  dots.className = "dots";
+  dots.setAttribute("role", "img");
+  dots.setAttribute("aria-label", `${openHosts.length} providers, ${mapped.length} of them on the map`);
+  dots.innerHTML = ring(true).repeat(lit) + ring(false).repeat(Math.min(openHosts.length - mapped.length, 40 - lit));
+  const foot = document.createElement("div");
+  foot.className = "hosts-foot";
+  foot.innerHTML = `<span class="hosts-key">${ring(true)}${mapped.length} on the map</span>`;
+  if (mapped.length) {
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "hosts-go";
+    go.innerHTML = `Show on globe <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    go.addEventListener("click", () => frameProviders(lab, mapped));
+    foot.append(go);
+  }
+  box.append(head, dots, foot);
+  band.append(box);
+  root.append(band);
+}
+
+/** Two big numbers side by side, each with a small caption. */
+function figures(root: HTMLElement, items: [string, string, boolean?][]) {
+  const row = document.createElement("div");
+  row.className = "figures";
+  items.forEach(([value, caption, hot], index) => {
+    if (index) row.append(Object.assign(document.createElement("i"), { className: "figure-rule" }));
+    const cell = document.createElement("div");
+    const big = document.createElement("span");
+    big.className = hot ? "figure-big hot" : "figure-big";
+    big.textContent = value;
+    const small = document.createElement("span");
+    small.className = "figure-small";
+    small.textContent = caption;
+    cell.append(big, small);
+    row.append(cell);
+  });
+  root.append(row);
+}
+
+function glanceTitle(root: HTMLElement, text: string): void {
+  const label = document.createElement("p");
+  label.className = "glance-title";
+  label.textContent = text;
+  root.append(label);
+}
+
+/** A bordered row that holds an icon, a label and an optional trailing note. */
+function row(icon: string, text: string, note = ""): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "glance-row";
+  el.innerHTML = svg(icon, 16);
+  el.append(text);
+  if (note) {
+    const tail = document.createElement("small");
+    tail.textContent = note;
+    el.append(tail);
+  }
+  return el;
+}
+
+const GLOBE = "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12ZM2 8h12M8 2c2 1.8 2 10.2 0 12M8 2c-2 1.8-2 10.2 0 12";
+
+/** Lab card body: headline numbers, newest model, and a button to its providers. */
+function paintLab(root: HTMLElement, lab: Lab, fresh: number, served: Host[], mapped: Host[]) {
+  figures(root, [
+    [String(lab.models), "models"],
+    [String(fresh), "new in 15 days", fresh > 0],
+  ]);
+  const newest = labModels(lab.id)[0];
+  if (newest) {
+    glanceTitle(root, "NEWEST");
+    const line = row("M8 2 14 8 8 14 2 8Z", newest.name, newest.release ? ago(newest.release) : "");
+    line.classList.add("hot-icon");
+    root.append(line);
+  }
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "glance-go";
+  go.innerHTML = `<span>${ring(true)}${served.length} providers · ${mapped.length} on the map</span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (mapped.length) {
+    go.addEventListener("click", () => {
+      revealFor = lab.id;
+      render();
+      frameProviders(lab, mapped);
+    });
+  } else {
+    go.disabled = true;
+  }
+  root.append(go);
+}
+
+/** Provider card body: headline numbers, the labs it serves, and how to connect. */
+function paintHost(root: HTMLElement, host: Host, served: Set<string>, byLab: Lab[], model: ModelRow | null) {
+  figures(root, [
+    [String(host.models), "models listed"],
+    [String(byLab.length), "labs served"],
+  ]);
+  if (model) {
+    glanceTitle(root, "SERVING");
+    root.append(row("M8 2 14 8 8 14 2 8Z", model.name));
+  }
+  if (byLab.length) {
+    glanceTitle(root, "LABS");
+    const names = document.createElement("p");
+    names.className = "glance-labs";
+    const shown = byLab.slice(0, 8);
+    names.textContent = shown.map((item) => item.name).join(" · ");
+    if (byLab.length > shown.length) {
+      const more = document.createElement("small");
+      more.textContent = ` +${byLab.length - shown.length} more`;
+      names.append(more);
+    }
+    root.append(names);
+  }
+  if (host.npm || host.api) {
+    glanceTitle(root, "CONNECT");
+    if (host.npm) root.append(row("M3 4.5l4 3.5-4 3.5M8.5 12h4.5", host.npm));
+    if (host.api) {
+      const link = document.createElement("a");
+      link.className = "glance-go api";
+      link.href = host.api;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.innerHTML = `<span>${svg(GLOBE, 16)}<b></b></span><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      (link.querySelector("b") as HTMLElement).textContent = host.api.replace(/^https?:\/\//, "");
+      root.append(link);
     }
   }
+  void served;
 }
 
 function addFact(root: HTMLElement, label: string, value: string, target?: string | (() => void)) {
